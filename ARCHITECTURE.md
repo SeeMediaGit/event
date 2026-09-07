@@ -106,11 +106,45 @@ Browser  ──JWT──────►  /api/*  ──service role──►  б
 
 Service role key зөвхөн `lib/supabase/server.ts` дотор, тэр нь `import "server-only"` тул client component-д импортлох гэвэл build дээр л унана. Одоогийн хуудсууд түүнийг хэрэглэдэггүй — жагсаалт RLS-ээр шууд ирнэ.
 
-## 7. Том файл оруулах (Bunny) — Vercel-ийн хязгаар
+## 7. Файл оруулах (Bunny)
 
-**Vercel-ийн serverless function-ий request body хязгаар 4.5 MB.** 4–5 GB кино түүгээр орох боломжгүй — timeout-д ч хүрэхгүй, эхний мегабайт дээрээ таг зогсоно. Тиймээс файлын байт **Vercel-ийн дундуур огт өнгөрөх ёсгүй**.
+Хоёр өөр загвар байна. Аль нэгийг нь сонгох шалгуур бол **файлын хэмжээ**.
 
-Зөв урсгал — browser → Bunny шууд, Vercel зөвхөн гарын үсэг өгнө:
+### 7.1 Одоо хэрэглэж байгаа: Bunny **Storage**, server-ээр дамжина
+
+Уралдааны бүтээл (`/challenge/[slug]` 4-р алхам) үүгээр явна.
+`see_media_admin/app/api/admin/bunny/upload/route.ts`-ийн яг хуулбар:
+
+```
+Browser → POST /api/challenge/upload   (multipart, Authorization: Bearer <token>)
+Server  → getUser(token)-оор дуудагчийг батална
+        → challenge_applications-аас (event_id, user_id)-ийн мөрийг олно,
+          status = paid эсэхийг шалгана
+        → PUT https://<endpoint>/<zone>/campaign_reels/<event>/<application>/film-<ts>.mp4
+          headers: AccessKey: BUNNY_STORAGE_ACCESS_KEY
+        → service role-оор film_file_url / film_file_path / status = 'uploaded' бичнэ
+        → буцаана { url, path }
+```
+
+Bunny **Stream биш**: video object, transcode, HLS байхгүй. Файл нь storage zone
+дотор энгийн объект болж хэвтээд `BUNNY_CDN_BASE_URL`-ээс шууд дамжина —
+admin панелийн poster, banner-тай яг ижил.
+
+`BUNNY_STORAGE_ACCESS_KEY`-г browser руу өгөх боломжгүй: Bunny Storage нь
+`AccessKey` header-ээр танидаг, объект тус бүрийн гарын үсэг гэж байхгүй. Тэр
+key-тэй хүн бүх зоныг устгаж чадна. Тиймээс байт server-ээр дамжихаас өөр
+аргагүй.
+
+⚠️ **Vercel-ийн serverless function-ий request body хязгаар 4.5 MB.** Дээрх
+урсгалд файл Vercel-ийн дундуур өнгөрдөг тул **4.5 MB-аас том файл production
+дээр 413-аар унана** (локал `next dev` дээр асуудалгүй, тиймээс энэ нь зөвхөн
+deploy хийсний дараа мэдэгдэнэ). Route-ийн `MAX_FILM_SIZE` 200 MB гэж бичсэн нь
+Vercel-ийн хязгаарыг өөрчлөхгүй — зөвхөн үүнээс томыг эрт таслана.
+
+### 7.2 Том файлд шаардлагатай: Bunny **Stream**, browser → Bunny шууд
+
+4–5 GB кино 7.1-ээр орох боломжгүй — эхний мегабайт дээрээ таг зогсоно. Тэр
+үед байт **Vercel-ийн дундуур огт өнгөрөх ёсгүй**:
 
 ```
 1. Browser → POST /api/bunny/upload-ticket        (жижигхэн JSON)
@@ -126,11 +160,10 @@ Service role key зөвхөн `lib/supabase/server.ts` дотор, тэр нь `
 5. Bunny   → transcode → HLS → webhook → Supabase-д hls_url бичнэ
 ```
 
-Vercel-ээр bandwidth өнгөрөхгүй тул төлбөр ч, хязгаар ч байхгүй.
+Энэ нь одоогоор **хийгдээгүй**. Хэрэв уралдааны бүтээл 4.5 MB-аас байнга том
+байх юм бол 7.1-ийг үүгээр солих хэрэгтэй.
 
 Жижиг зураг (poster, cover) → Supabase Storage хэвээр, тэр нь асуудалгүй.
-
-`BUNNY_STREAM_API_KEY`-г **заавал** server-only env-д тавь. `NEXT_PUBLIC_` угтвартай болговол bundle дотор нийтлэгдэж, тэр key-тэй хүн танай бүх видеог устгаж чадна.
 
 ## 8. Deploy
 
@@ -138,13 +171,27 @@ Vercel дээр **шинэ project**, root directory = `events/`.
 
 Env variables:
 
+Хувьсагчийн **нэрс нь `see_media_admin/.env`-тэй яг ижил** — нэг багц утгыг
+хоёр төсөлд нэр өөрчлөхгүйгээр буулгаж болно. Жишээг
+[.env.local.example](.env.local.example)-ээс үз.
+
 | Нэр | Хаана | Тэмдэглэл |
 |---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | client | нийтийн |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | client | нийтийн, bundle дотор явна |
-| `SUPABASE_SERVICE_ROLE_KEY` | **server only** | одоо хэрэггүй, дараа нь |
-| `BUNNY_STREAM_LIBRARY_ID` | server only | дараа нь |
-| `BUNNY_STREAM_API_KEY` | **server only** | дараа нь |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY` | client | нийтийн, bundle дотор явна. Supabase-ийн шинэ нэр, өмнөх "anon key" |
+| `SUPABASE_SERVICE_ROLE_KEY` | **server only** | upload route. `NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY` нэрийг ч уншина (admin-ийн .env тэгж өгдөг) |
+| `BUNNY_STORAGE_ZONE` | **server only** | |
+| `BUNNY_STORAGE_REGION` | **server only** | хоосон / `de` бол Frankfurt |
+| `BUNNY_STORAGE_ACCESS_KEY` | **server only** | browser руу гарвал бүх зон устгагдаж болно |
+| `BUNNY_CDN_BASE_URL` | **server only** | буцаах URL-ийн эх |
+| `BUNNY_STORAGE_ENDPOINT` | server only | заавал биш, REGION-ыг дарна |
+
+`NEXT_PUBLIC_` угтвар нь key-г автоматаар нийтэлдэггүй: Next нь **кодод
+бичигдсэн газарт нь** текстээр орлуулдаг тул зөвхөн server файлаас уншсан
+хувьсагч client bundle руу орохгүй. `lib/supabase/server.ts` нь
+`import "server-only"` — client component-оос импортлох гэвэл build унана.
+Батлагдсан: build-ийн дараа `.next/static/`-д service role key ч, Bunny access
+key ч байхгүй.
 
 Домэйн: `events.seemedia.mn` (CNAME → Vercel).
 
@@ -155,7 +202,8 @@ Env variables:
 Одоо байхгүй, гэхдээ схем нь саадгүй өргөжинө:
 
 - **Админ UI.** Одоогоор Supabase SQL editor-оос гараар мөр нэмнэ. Дараа нь `see_media_admin`-д `/admin/events` нэмэх нь зөв — санамж: тэр төсөл дээр `npm run route:generate` эвдэрсэн, `routeTree.gen.ts`-ийг гараар засна.
-- **Оролцогчийн бүртгэл.** `event_entries (id, event_id, user_id, title, video_id, status, created_at)` + өөрийн мөрөө уншиж/бичих RLS.
+- **Оролцогчийн бүртгэл.** Хийгдсэн — `challenge_applications`
+  (20260907_challenge_applications.sql) + `/challenge/[slug]` 4 алхамт урсгал.
 - **Санал хураалт.** `event_votes (event_id, entry_id, user_id)` + `unique(entry_id, user_id)` — нэг хүн нэг удаа.
 - **Видео тоглуулах.** Тоглуулах URL-ыг `events` дээр бүү тавь — **тусдаа `event_media` хүснэгтэд, policy огт үүсгэлгүй** байрлуул. Тэгвэл `select` бичихдээ алдсан ч гоожихгүй; `movies` дээр `hls_url` ижил мөрөн дээрээ байгаа болохоор `MOVIE_COLUMNS`-оос мартаж гаргавал шууд алдана. Дараа нь `/api/events/stream` нь `landing/app/api/watch/stream/route.ts`-ийг хуулж хийнэ.
 - **Slug URL.** `slug` багана бэлэн; `/events/[id]`-г `/events/[slug]` болгоход л хангалттай.

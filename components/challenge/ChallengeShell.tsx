@@ -162,7 +162,7 @@ export default function ChallengeShell({ slug }: { slug: string }) {
     "";
 
   return (
-    <div className="min-h-screen lg:pl-[76px]">
+    <div className="min-h-screen lg:pl-[88px]">
       <AppSidebar />
 
       <header className="sticky top-0 z-30 border-b border-white/8 bg-ink/80 backdrop-blur-xl">
@@ -222,7 +222,13 @@ export default function ChallengeShell({ slug }: { slug: string }) {
             {step === 3 && (
               <FeeStep event={load.event} application={application} />
             )}
-            {step === 4 && <UploadStep event={load.event} />}
+            {step === 4 && (
+              <UploadStep
+                event={load.event}
+                application={application}
+                onUploaded={setApplication}
+              />
+            )}
           </>
         )}
       </main>

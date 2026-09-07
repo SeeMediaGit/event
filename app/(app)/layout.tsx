@@ -14,7 +14,7 @@ export default function AppLayout({
 }) {
   return (
     <AuthGuard>
-      <div className="min-h-screen lg:pl-[76px]">
+      <div className="min-h-screen lg:pl-[88px]">
         <AppSidebar />
         <Navbar />
         {/* pb-28 clears the mobile tab bar; lg drops back to normal spacing. */}

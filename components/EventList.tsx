@@ -45,7 +45,10 @@ export default function EventList() {
 
   if (events.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 px-6 py-20 text-center">
+      // Sized to its own content rather than stretched to the grid's full
+      // width: an empty state as wide as three cards reads as a broken layout,
+      // not as "nothing here yet".
+      <div className="mx-auto flex max-w-md flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 px-6 py-16 text-center">
         <CalendarX size={32} className="mb-4 text-white/20" />
         <p className="text-sm font-semibold text-white/80">
           Одоогоор нээлттэй уралдаан тэмцээн алга

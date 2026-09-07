@@ -43,6 +43,9 @@ const APPLICATION_COLUMNS = [
   "edit_software_other",
   "has_prior_films",
   "prior_films_note",
+  "film_file_url",
+  "film_file_path",
+  "film_uploaded_at",
   "created_at",
   "updated_at",
 ].join(", ");

@@ -68,6 +68,12 @@ export type ChallengeApplication = {
   has_prior_films: boolean | null;
   prior_films_note: string | null;
 
+  // 20260909_challenge_film_upload.sql. Written by the upload route under the
+  // service role — the client holds no grant on these.
+  film_file_url: string | null;
+  film_file_path: string | null;
+  film_uploaded_at: string | null;
+
   created_at: string;
   updated_at: string;
 };
