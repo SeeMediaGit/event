@@ -176,7 +176,7 @@ export default function ChallengeShell({ slug }: { slug: string }) {
 
           <div className="flex items-center gap-3">
             {application && (
-              <span className="whitespace-nowrap rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-white/70">
+              <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-white/70">
                 {STATUS_LABEL[application.status]}
               </span>
             )}
@@ -189,7 +189,7 @@ export default function ChallengeShell({ slug }: { slug: string }) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-6 sm:px-6 sm:pt-8 lg:pb-14">
+      <main className="mx-auto max-w-5xl px-4 pb-28 pt-6 sm:px-6 sm:pt-8 lg:pb-14">
         {/* The application read only gates the UI once there is an event to
             read it for — otherwise a missing event would leave a signed-in
             visitor on the skeleton forever, since appLoaded never flips. */}
@@ -290,17 +290,8 @@ function MissingCard({
 function ChallengeSkeleton() {
   return (
     <div className="space-y-7">
-      {/* Mirrors the real stepper, in both of its shapes: the compact bar on a
-          phone, the numbered row from sm up. */}
-      <div className="sm:hidden">
-        <div className="h-[60px] w-full animate-pulse rounded-2xl bg-white/5" />
-        <div className="mt-2 flex gap-1.5">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-1 flex-1 animate-pulse rounded-full bg-white/5" />
-          ))}
-        </div>
-      </div>
-      <div className="relative hidden items-start justify-between sm:flex">
+      {/* Mirrors the real stepper: circle, label, connector line. */}
+      <div className="relative flex items-start justify-between">
         <span className="absolute left-0 top-4 h-px w-full bg-white/10" />
         {Array.from({ length: 4 }).map((_, i) => (
           <div
@@ -313,7 +304,7 @@ function ChallengeSkeleton() {
         ))}
       </div>
       <div className="h-[300px] w-full animate-pulse rounded-2xl bg-white/5 sm:h-[420px]" />
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="h-[86px] animate-pulse rounded-xl bg-white/5" />
         ))}

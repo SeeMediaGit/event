@@ -95,7 +95,7 @@ export default function LoginForm() {
               onChange={(e) => setPhone(e.target.value)}
               placeholder="99112233"
               autoComplete="tel"
-              className="w-full bg-transparent py-3 text-base text-white outline-none placeholder:text-white/30 sm:text-sm"
+              className="w-full bg-transparent py-3 text-sm text-white outline-none placeholder:text-white/30"
             />
           </div>
 
@@ -114,7 +114,7 @@ export default function LoginForm() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               autoComplete="current-password"
-              className="w-full bg-transparent py-3 text-base text-white outline-none placeholder:text-white/30 sm:text-sm"
+              className="w-full bg-transparent py-3 text-sm text-white outline-none placeholder:text-white/30"
             />
             <button
               type="button"
