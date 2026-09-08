@@ -114,7 +114,16 @@ export default function Hero3D({
       // Reduced motion means no frame loop at all: r3f renders a single frame
       // on demand and then sits idle.
       frameloop={animate ? "always" : "demand"}
-      style={{ position: "absolute", inset: 0 }}
+      // r3f puts `touch-action: none` on the canvas so a drag can orbit a
+      // scene. Nothing here is draggable, and on a phone that setting means a
+      // swipe starting anywhere on the hero — the top third of the screen —
+      // scrolls nothing at all. pointerEvents: none hands every touch back to
+      // the page; the pointer parallax it costs is a mouse feature anyway.
+      style={
+        isMobile
+          ? { position: "absolute", inset: 0, pointerEvents: "none", touchAction: "pan-y" }
+          : { position: "absolute", inset: 0 }
+      }
     >
       <color attach="background" args={["#050505"]} />
       <fog attach="fog" args={["#050505", 7, 14]} />
@@ -153,14 +162,15 @@ export default function Hero3D({
       <FilmReel animate={animate} speedRef={speedRef} />
       <PosterField urls={urls} count={isMobile ? 3 : 6} animate={animate} />
 
-      <CameraParallax enabled={animate} />
+      <CameraParallax enabled={animate && !isMobile} />
     </Canvas>
   );
 }
 
 // Camera follows the pointer a little. Deliberately small (±0.55 world units)
 // and heavily damped — a hero that lurches at the mouse is a hero people scroll
-// past. Disabled entirely under prefers-reduced-motion.
+// past. Disabled entirely under prefers-reduced-motion, and on a phone, where
+// there is no hovering pointer to follow and the canvas takes no events.
 function CameraParallax({ enabled }: { enabled: boolean }) {
   const { camera } = useThree();
   const target = useMemo(() => new THREE.Vector3(0, 0, 0), []);

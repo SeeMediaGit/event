@@ -157,7 +157,11 @@ export default function IntroStep({
         </section>
       )}
 
-      <section className="rounded-2xl border border-brand/25 bg-brand/5 p-6">
+      <section className="relative overflow-hidden rounded-2xl border border-brand/25 bg-brand/5 p-6">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-24 -top-24 h-48 w-48 rounded-full bg-brand/10 blur-[60px]"
+        />
         {isSignedIn ? (
           <>
             <p className="text-sm font-semibold text-white">

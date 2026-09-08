@@ -60,8 +60,11 @@ export function Field({
   );
 }
 
+// text-base on a phone, text-sm from sm up. Not a taste call: iOS Safari zooms
+// the whole page in when a focused input is under 16px, and it never zooms back
+// out — one tap on "Нас" and the rest of the form is off the right edge.
 const INPUT_CLASS =
-  "w-full rounded-xl border border-white/10 bg-ink px-3 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-brand/50 disabled:cursor-not-allowed disabled:text-white/50";
+  "w-full rounded-xl border border-white/10 bg-ink px-3 py-3 text-base text-white outline-none transition placeholder:text-white/30 focus:border-brand/50 disabled:cursor-not-allowed disabled:text-white/50 sm:text-sm";
 
 export function TextInput({
   id,
@@ -136,8 +139,10 @@ export function TextArea({
 // Chip-style radio / checkbox groups. Real <input> elements underneath a styled
 // label, so keyboard navigation and screen readers get the native behaviour and
 // the visual is purely CSS.
+// 44px is the smallest thing a thumb hits reliably. From sm up the
+// chip shrinks back to the tighter row a mouse deserves.
 const CHIP_BASE =
-  "cursor-pointer select-none rounded-xl border px-3.5 py-2 text-xs font-semibold transition";
+  "inline-flex min-h-[44px] cursor-pointer select-none items-center rounded-xl border px-4 text-sm font-semibold transition sm:min-h-0 sm:px-3.5 sm:py-2 sm:text-xs";
 const CHIP_ON = "border-brand/50 bg-brand/15 text-brand-light";
 const CHIP_OFF =
   "border-white/10 bg-ink text-white/60 hover:border-white/25 hover:text-white";

@@ -5,6 +5,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Clapperboard,
+  FileVideo,
   Loader2,
   UploadCloud,
 } from "lucide-react";
@@ -124,11 +125,17 @@ export default function UploadStep({
           </p>
         </div>
       ) : (
-        <div className="rounded-2xl border border-white/8 bg-ink-surface/60 p-5 sm:p-6">
-          <h2 className="text-sm font-bold text-white">
+        <div className="relative overflow-hidden rounded-2xl border border-white/8 bg-ink-surface/60 p-5 backdrop-blur-md transition-colors hover:border-brand/25 sm:p-6">
+          {/* Faint brand bloom in the corner — the only depth cue; no drop
+              shadows anywhere in this design. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -right-24 -top-24 h-48 w-48 rounded-full bg-brand/5 blur-[60px]"
+          />
+          <h2 className="relative text-sm font-bold text-white">
             {uploaded ? "Бүтээлээ солих" : "Бүтээлээ оруулах"}
           </h2>
-          <p className="mt-1 text-xs text-muted">
+          <p className="relative mt-1 text-xs text-muted">
             MP4, MOV, WebM, MKV. Дээд хэмжээ {formatBytes(MAX_FILM_SIZE)}.
           </p>
 
@@ -145,10 +152,18 @@ export default function UploadStep({
               disabled={busy}
               onChange={(e) => pick(e.target.files?.[0] ?? null)}
             />
-            <UploadCloud size={26} className="mb-3 text-white/30" />
+            <span
+              className={`mb-4 flex h-16 w-16 items-center justify-center rounded-full border transition ${
+                file
+                  ? "border-brand/40 bg-brand/10 text-brand shadow-glow"
+                  : "border-white/10 bg-ink-elevated text-white/30"
+              }`}
+            >
+              {file ? <FileVideo size={26} /> : <UploadCloud size={26} />}
+            </span>
             {file ? (
               <>
-                <span className="break-all text-sm font-semibold text-white">
+                <span className="max-w-full break-all text-sm font-bold text-white">
                   {file.name}
                 </span>
                 <span className="mt-1 text-xs text-muted">
@@ -165,21 +180,30 @@ export default function UploadStep({
                 </span>
               </>
             )}
-          </label>
 
-          {busy && (
-            <div className="mt-4">
-              <div className="h-2 w-full overflow-hidden rounded-full bg-white/8">
-                <div
-                  className="h-full rounded-full bg-brand transition-[width] duration-200"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <p className="mt-2 text-xs text-muted">
-                Байршуулж байна… {progress}%
-              </p>
-            </div>
-          )}
+            {/* Progress lives inside the drop zone, directly under the file it
+                describes, rather than floating below the card. */}
+            {busy && file && (
+              <span className="mt-6 block w-full">
+                <span className="mb-2 flex items-end justify-between">
+                  <span className="text-xs text-muted">Байршуулж байна…</span>
+                  <span className="text-sm font-bold text-brand">
+                    {progress}%
+                  </span>
+                </span>
+                <span className="block h-2 w-full overflow-hidden rounded-full border border-white/8 bg-ink-elevated">
+                  <span
+                    className="block h-full rounded-full bg-brand shadow-[0_0_10px_rgba(34,197,94,0.5)] transition-[width] duration-200 ease-out"
+                    style={{ width: `${progress}%` }}
+                  />
+                </span>
+                <span className="mt-2 block text-xs text-muted">
+                  {formatBytes(Math.round((file.size * (progress ?? 0)) / 100))}{" "}
+                  / {formatBytes(file.size)}
+                </span>
+              </span>
+            )}
+          </label>
 
           {error && (
             <p className="mt-4 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">

@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import defaultTheme from "tailwindcss/defaultTheme";
 
 // Same palette as landing/ so the events site reads as the same product.
 const config: Config = {
@@ -8,6 +9,12 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        // --font-sans is set by next/font in app/layout.tsx. The default stack
+        // stays behind it as the fallback, so a failed font load degrades to
+        // the system face rather than to a serif.
+        sans: ["var(--font-sans)", ...defaultTheme.fontFamily.sans],
+      },
       colors: {
         ink: {
           DEFAULT: "#0a0a0a",

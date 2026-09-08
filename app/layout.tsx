@@ -1,6 +1,20 @@
 import type { Metadata, Viewport } from "next";
+import { Manrope } from "next/font/google";
 import { AuthProvider } from "@/components/AuthProvider";
 import "./globals.css";
+
+// Self-hosted by next/font at build time — no request to Google's CDN at
+// runtime, and no layout shift while the face loads.
+//
+// Manrope, not Plus Jakarta Sans: every word in this UI is Mongolian Cyrillic,
+// and Jakarta ships no Cyrillic glyphs at all, so it would have been silently
+// replaced by the system font across the entire interface. The `cyrillic`
+// subset below is the part that actually matters here.
+const sans = Manrope({
+  subsets: ["latin", "latin-ext", "cyrillic"],
+  display: "swap",
+  variable: "--font-sans",
+});
 
 export const metadata: Metadata = {
   title: "SeeMedia Events — Уралдаан тэмцээн",
@@ -21,7 +35,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="mn">
+    <html lang="mn" className={sans.variable}>
       <body>
         <AuthProvider>{children}</AuthProvider>
       </body>

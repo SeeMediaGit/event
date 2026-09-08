@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowLeft, CalendarDays, Clock, Loader2, MapPin, Trophy } from "lucide-react";
+import { ArrowLeft, CalendarDays, Clock, MapPin, Trophy } from "lucide-react";
 import { fetchEventById } from "@/lib/events/api";
 import { formatDateRange, formatDateTime, formatLongDate } from "@/lib/events/format";
 import {
@@ -32,13 +32,10 @@ export default function EventDetail({ eventId }: { eventId: string }) {
     };
   }, [eventId]);
 
-  if (state.status === "loading") {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <Loader2 size={28} className="animate-spin text-brand" />
-      </div>
-    );
-  }
+  // A skeleton, not a spinner. A spinner says "something is happening"; a
+  // skeleton says "the page will look like this", and it does not move the
+  // layout when the real content lands.
+  if (state.status === "loading") return <EventDetailSkeleton />;
 
   if (state.status === "not_found") {
     return (
@@ -148,6 +145,25 @@ export default function EventDetail({ eventId }: { eventId: string }) {
         </p>
       )}
     </article>
+  );
+}
+
+function EventDetailSkeleton() {
+  return (
+    <div>
+      <div className="mb-6 h-4 w-28 animate-pulse rounded bg-white/5" />
+      <div className="mb-8 aspect-[21/9] w-full animate-pulse rounded-2xl bg-white/5" />
+      <div className="mb-3 h-6 w-24 animate-pulse rounded-full bg-white/5" />
+      <div className="h-9 w-3/4 animate-pulse rounded bg-white/5 sm:h-11" />
+      <div className="mt-3 h-4 w-full animate-pulse rounded bg-white/5" />
+      <div className="mt-2 h-4 w-2/3 animate-pulse rounded bg-white/5" />
+      <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="h-[86px] animate-pulse rounded-xl bg-white/5" />
+        ))}
+      </div>
+      <div className="mt-10 h-44 w-full animate-pulse rounded-2xl bg-white/5" />
+    </div>
   );
 }
 
