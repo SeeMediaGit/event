@@ -88,7 +88,8 @@ export default function UploadStep({
     setProgress(null);
     setFile(null);
     if (inputRef.current) inputRef.current.value = "";
-    if (fresh) onUploaded(fresh);
+    if (fresh.ok && fresh.application) onUploaded(fresh.application);
+    else if (!fresh.ok) setError(fresh.message);
   };
 
   return (

@@ -77,9 +77,15 @@ function saveErrorMessage(code: string | undefined): string {
 // The signed-in user's application for one challenge. RLS already restricts the
 // table to auth.uid() = user_id, so no user filter is needed here — and adding
 // one would be a second place to get wrong.
-export async function fetchMyApplication(
-  eventId: string,
-): Promise<ChallengeApplication | null> {
+export type LoadResult =
+  | { ok: true; application: ChallengeApplication | null }
+  | { ok: false; message: string };
+
+// A failed read and "this person has not applied yet" are NOT the same thing,
+// and collapsing both into `null` is how a broken read turns into a silent
+// second INSERT that then dies on the unique (event_id, user_id) constraint.
+// The caller gets to tell them apart.
+export async function fetchMyApplication(eventId: string): Promise<LoadResult> {
   const supabase = getSupabaseBrowserClient();
 
   const { data, error } = await supabase
@@ -90,9 +96,27 @@ export async function fetchMyApplication(
 
   if (error) {
     console.error(`fetchMyApplication(${eventId}) error:`, error);
-    return null;
+    // 42703 = undefined_column. It means the app is asking for a column the
+    // live schema does not have — i.e. a migration in supabase/migrations/ has
+    // not been applied yet. Worth saying plainly: every other message here
+    // would send someone hunting for a network problem that isn't there.
+    if (error.code === "42703") {
+      return {
+        ok: false,
+        message:
+          "Өгөгдлийн сангийн бүтэц кодтой таарахгүй байна. Хүлээгдэж буй миграцийг ажиллуулна уу.",
+      };
+    }
+    return {
+      ok: false,
+      message: "Анкетыг уншиж чадсангүй. Интернэтээ шалгаад дахин оролдоно уу.",
+    };
   }
-  return (data as unknown as ChallengeApplication) ?? null;
+
+  return {
+    ok: true,
+    application: (data as unknown as ChallengeApplication) ?? null,
+  };
 }
 
 // Create the row. Note what is NOT sent:

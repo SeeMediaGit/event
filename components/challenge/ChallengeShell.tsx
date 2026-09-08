@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LogIn, Trophy } from "lucide-react";
+import { AlertTriangle, LogIn, Trophy } from "lucide-react";
 import AppSidebar from "@/components/AppSidebar";
 import { SeeMediaLogo } from "@/components/Brand";
 import { useAuth } from "@/components/AuthProvider";
@@ -41,6 +41,7 @@ export default function ChallengeShell({ slug }: { slug: string }) {
     null,
   );
   const [appLoaded, setAppLoaded] = useState(false);
+  const [appError, setAppError] = useState<string | null>(null);
 
   const isSignedIn = Boolean(session);
 
@@ -70,9 +71,15 @@ export default function ChallengeShell({ slug }: { slug: string }) {
     }
     let mounted = true;
 
-    fetchMyApplication(eventId).then((row) => {
+    fetchMyApplication(eventId).then((result) => {
       if (!mounted) return;
-      setApplication(row);
+      if (result.ok) {
+        setApplication(result.application);
+        setAppError(null);
+      } else {
+        setApplication(null);
+        setAppError(result.message);
+      }
       setAppLoaded(true);
     });
 
@@ -203,6 +210,23 @@ export default function ChallengeShell({ slug }: { slug: string }) {
             <div className="mb-7">
               <Stepper steps={steps} current={step} onSelect={goToStep} />
             </div>
+
+            {appError && (
+              <div className="mb-6 flex items-start gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
+                <AlertTriangle
+                  size={16}
+                  className="mt-0.5 shrink-0 text-red-300"
+                />
+                <div>
+                  <p className="text-sm font-semibold text-red-100">
+                    Анкетын мэдээлэл ачаалагдсангүй.
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-red-200/80">
+                    {appError} Хадгалах товч ажиллахгүй байж болзошгүй.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {step === 1 && (
               <IntroStep
