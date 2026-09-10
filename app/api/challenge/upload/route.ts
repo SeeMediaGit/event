@@ -4,37 +4,29 @@ import {
   getSupabaseServiceClient,
 } from "@/lib/supabase/server";
 
-// Uploads for one film of a challenge entry, built the same way
+// POSTER uploads for one film of a challenge entry, built the same way
 // see_media_admin does it (app/api/admin/bunny/upload/route.ts): the browser
-// posts the file here, this route holds the Bunny Storage access key and PUTs
+// posts the image here, this route holds the Bunny Storage access key and PUTs
 // the bytes on to the CDN.
 //
-// Three kinds go through it, told apart by the `kind` field:
-//   poster            — босоо постер   (image)
-//   horizontal_poster — хэвтээ постер  (image)
-//   film              — the film itself (video)
+// Two kinds, told apart by the `kind` field:
+//   poster            — босоо постер
+//   horizontal_poster — хэвтээ постер
 //
-// Posters only travel one way: the URL comes back and the *client* saves it,
+// THE FILM ITSELF NO LONGER COMES THROUGH HERE. A Vercel function caps a
+// request body at 4.5 MB, which no real entry fits under, so films go browser →
+// Bunny Stream directly over tus: /api/challenge/film-ticket issues a
+// per-video signature and the bytes never touch this server.
+//
+// Posters cannot do the same, and that is the whole reason for the split: Bunny
+// *Storage* authenticates with a zone-wide `AccessKey` header and has no
+// per-object signed upload, so a browser holding that key could overwrite or
+// delete the entire zone. Bunny *Stream* does offer a per-video signature.
+// Images are small, so passing them through a server costs nothing.
+//
+// The URL travels one way only: it comes back and the *client* saves it,
 // because poster_url and horizontal_poster_url are inside the entrant's column
-// grant. The film does not — film_url / film_path / film_status have no grant
-// at all, so this route writes them under the service role, exactly as
-// registration_no is written for the application.
-//
-// It is NOT Bunny Stream. Nothing here creates a video object, waits for a
-// transcode, or hands back an HLS URL — the file lands in the storage zone as a
-// plain object served straight off BUNNY_CDN_BASE_URL.
-//
-// ⚠️ VERCEL 4.5 MB BODY LIMIT. The bytes pass through this function, so a film
-// larger than that is rejected by the platform *before* the route runs and no
-// message from here ever reaches the browser. Posters are safely under it;
-// films are not, and the fix is the Bunny Stream + tus path described in
-// ARCHITECTURE.md §7.2 (browser → Bunny direct, no server in the middle).
-// MAX_FILM_SIZE below does not change that — it only refuses the too-large file
-// earlier, and locally (`next dev`) there is no such limit at all.
-//
-// WHY THE KEY CANNOT GO TO THE BROWSER: Bunny Storage authenticates with an
-// `AccessKey` header and has no per-object signed upload. A browser holding
-// that key could overwrite or delete the entire zone.
+// grant. Nothing here writes to the database.
 
 export const runtime = "nodejs";
 // The whole point of this route is receiving a file; nothing about it can be
@@ -45,15 +37,7 @@ export const dynamic = "force-dynamic";
 // rename the folder in the storage zone.
 const CAMPAIGN_FOLDER = "campaign_reels";
 
-const MAX_FILM_SIZE = 200 * 1024 * 1024;
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
-
-const ALLOWED_VIDEO_TYPES = new Map<string, string>([
-  ["video/mp4", "mp4"],
-  ["video/quicktime", "mov"],
-  ["video/webm", "webm"],
-  ["video/x-matroska", "mkv"],
-]);
 
 const ALLOWED_IMAGE_TYPES = new Map<string, string>([
   ["image/jpeg", "jpg"],
@@ -71,12 +55,11 @@ const UPLOADABLE_APPLICATION_STATUSES = new Set([
   "approved",
 ]);
 
-type UploadKind = "poster" | "horizontal_poster" | "film";
+type UploadKind = "poster" | "horizontal_poster";
 
 const KIND_PREFIX: Record<UploadKind, string> = {
   poster: "poster",
   horizontal_poster: "poster-h",
-  film: "film",
 };
 
 // Same shape as the admin route: BUNNY_STORAGE_ENDPOINT wins if set, otherwise
@@ -164,30 +147,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "kind буруу байна." }, { status: 400 });
     }
 
-    const isFilm = kind === "film";
-    const extension = isFilm
-      ? ALLOWED_VIDEO_TYPES.get(file.type)
-      : ALLOWED_IMAGE_TYPES.get(file.type);
-
+    const extension = ALLOWED_IMAGE_TYPES.get(file.type);
     if (!extension) {
       return NextResponse.json(
-        {
-          error: isFilm
-            ? "Зөвхөн MP4, MOV, WebM, MKV бичлэг оруулах боломжтой."
-            : "Зөвхөн JPG, PNG, WebP зураг оруулах боломжтой.",
-        },
+        { error: "Зөвхөн JPG, PNG, WebP зураг оруулах боломжтой." },
         { status: 400 },
       );
     }
-
-    const maxSize = isFilm ? MAX_FILM_SIZE : MAX_IMAGE_SIZE;
-    if (file.size > maxSize) {
+    if (file.size > MAX_IMAGE_SIZE) {
       return NextResponse.json(
-        {
-          error: isFilm
-            ? "Бичлэг 200MB-аас бага байх ёстой."
-            : "Зураг 10MB-аас бага байх ёстой.",
-        },
+        { error: "Зураг 10MB-аас бага байх ёстой." },
         { status: 413 },
       );
     }
@@ -292,36 +261,9 @@ export async function POST(request: NextRequest) {
 
     const url = `${cdnBaseUrl}/${storagePath}`;
 
-    // Posters stop here: the URL goes back and the client saves it with the
-    // rest of the form, so an entrant who picks a poster and then abandons the
-    // form has not silently changed their saved entry.
-    if (!isFilm) {
-      return NextResponse.json({ url, path: storagePath });
-    }
-
-    // The film's own columns have no grant, so only the service role can point
-    // the row at the bytes.
-    const { error: updateError } = await supabase
-      .from("challenge_films")
-      .update({
-        film_url: url,
-        film_path: storagePath,
-        film_status: "ready",
-        film_uploaded_at: new Date().toISOString(),
-      })
-      .eq("id", film.id);
-
-    if (updateError) {
-      // The bytes are on the CDN but the row does not point at them. Say so
-      // plainly rather than reporting success — a silent half-write here means
-      // an entry that looks delivered and is not.
-      console.error("upload: row update failed", updateError, { storagePath });
-      return NextResponse.json(
-        { error: "Файл хуулагдсан ч бүртгэгдсэнгүй. Дахин оролдоно уу." },
-        { status: 500 },
-      );
-    }
-
+    // Nothing is written to the row here: the entrant saves poster_url with the
+    // rest of the form, so picking a poster and then abandoning the form does
+    // not silently change a saved entry.
     return NextResponse.json({ url, path: storagePath });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

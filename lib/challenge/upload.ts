@@ -2,27 +2,24 @@
 
 import { getSupabaseBrowserClient } from "../supabase/client";
 
-// Client half of the challenge uploads, mirroring
-// see_media_admin/lib/bunnyUpload.ts: attach the Supabase access token, post a
-// multipart body to our own route, and let that route talk to Bunny.
+// POSTERS ONLY. Mirrors see_media_admin/lib/bunnyUpload.ts: attach the Supabase
+// access token, post a multipart body to our own route, and let that route talk
+// to Bunny Storage.
 //
-// XMLHttpRequest rather than fetch — the one thing this differs on. fetch gives
-// no upload progress, and a film is not a poster: a hundred-megabyte upload
-// with no progress bar is indistinguishable from a hung page.
-
-export const ACCEPTED_FILM_TYPES = [
-  "video/mp4",
-  "video/quicktime",
-  "video/webm",
-  "video/x-matroska",
-];
+// The film itself does NOT come through here — it goes browser → Bunny Stream
+// directly over tus (lib/challenge/films/upload.ts). The split is not stylistic:
+// Bunny *Storage* authenticates with a zone-wide AccessKey and has no
+// per-object signature, so its bytes must pass through a server holding that
+// key, and a Vercel function caps a request body at 4.5 MB. Posters fit under
+// that; films never did.
+//
+// XMLHttpRequest rather than fetch — fetch gives no upload progress.
 
 export const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
-export const MAX_FILM_SIZE = 200 * 1024 * 1024;
 export const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
-export type UploadKind = "poster" | "horizontal_poster" | "film";
+export type UploadKind = "poster" | "horizontal_poster";
 
 export type UploadResult =
   | { ok: true; url: string; path: string }
@@ -36,19 +33,13 @@ export function formatBytes(bytes: number): string {
 }
 
 // Checked here as well as in the route. The route is the one that counts — this
-// copy just saves the entrant a long upload that ends in a refusal.
-export function checkFile(file: File, kind: UploadKind): string | null {
-  const isFilm = kind === "film";
-  const types = isFilm ? ACCEPTED_FILM_TYPES : ACCEPTED_IMAGE_TYPES;
-  const max = isFilm ? MAX_FILM_SIZE : MAX_IMAGE_SIZE;
-
-  if (!types.includes(file.type)) {
-    return isFilm
-      ? "Зөвхөн MP4, MOV, WebM, MKV бичлэг оруулах боломжтой."
-      : "Зөвхөн JPG, PNG, WebP зураг оруулах боломжтой.";
+// copy just saves the entrant an upload that ends in a refusal.
+export function checkFile(file: File, _kind: UploadKind): string | null {
+  if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+    return "Зөвхөн JPG, PNG, WebP зураг оруулах боломжтой.";
   }
-  if (file.size > max) {
-    return `Файл ${formatBytes(max)}-аас бага байх ёстой. Сонгосон файл: ${formatBytes(file.size)}.`;
+  if (file.size > MAX_IMAGE_SIZE) {
+    return `Зураг ${formatBytes(MAX_IMAGE_SIZE)}-аас бага байх ёстой. Сонгосон файл: ${formatBytes(file.size)}.`;
   }
   return null;
 }
@@ -107,10 +98,7 @@ export async function uploadChallengeFile({
       if (xhr.status === 413) {
         resolve({
           ok: false,
-          message:
-            kind === "film"
-              ? "Файл хэт том байна. Одоогоор 4.5MB-аас том бичлэг серверээр дамжихгүй."
-              : "Зураг хэт том байна. Багасгаад дахин оролдоно уу.",
+          message: "Зураг хэт том байна. Багасгаад дахин оролдоно уу.",
         });
         return;
       }

@@ -223,7 +223,9 @@ function FilmRow({
   film: ChallengeFilm;
   onOpen: () => void;
 }) {
-  const hasVideo = Boolean(film.film_url);
+  // film_url is written when the upload ticket is issued, before any bytes
+  // exist — only film_status says whether there is a playable stream.
+  const hasVideo = film.film_status === "ready";
 
   return (
     <button
@@ -264,10 +266,18 @@ function FilmRow({
             className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
               hasVideo
                 ? "border border-brand/30 bg-brand/10 text-brand-light"
-                : "border border-white/10 bg-white/5 text-white/50"
+                : film.film_status === "failed"
+                  ? "border border-red-500/30 bg-red-500/10 text-red-300"
+                  : "border border-white/10 bg-white/5 text-white/50"
             }`}
           >
-            {hasVideo ? "Бичлэг орсон" : "Бичлэг ороогүй"}
+            {hasVideo
+              ? "Бичлэг орсон"
+              : film.film_status === "processing"
+                ? "Боловсруулж байна"
+                : film.film_status === "failed"
+                  ? "Бичлэг амжилтгүй"
+                  : "Бичлэг ороогүй"}
           </span>
         </span>
       </span>

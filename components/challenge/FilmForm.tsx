@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -31,10 +31,15 @@ import {
 } from "@/lib/challenge/films/types";
 import {
   ACCEPTED_FILM_TYPES,
-  ACCEPTED_IMAGE_TYPES,
-  checkFile,
+  checkFilmFile,
+  checkFilmStatus,
   formatBytes,
   MAX_FILM_SIZE,
+  uploadFilm,
+} from "@/lib/challenge/films/upload";
+import {
+  ACCEPTED_IMAGE_TYPES,
+  checkFile,
   uploadChallengeFile,
   type UploadKind,
 } from "@/lib/challenge/upload";
@@ -106,8 +111,12 @@ export default function FilmForm({
       // The video is not part of validateFilmForSubmit because it is not a form
       // field — it is written by the upload route — but an entry without it is
       // not an entry.
-      if (!current.film_url) {
-        setMessage("Бүтээлээ оруулсны дараа илгээнэ үү.");
+      if (current.film_status !== "ready") {
+        setMessage(
+          current.film_status === "processing"
+            ? "Бичлэг боловсруулагдаж дуусаагүй байна. Түр хүлээнэ үү."
+            : "Бүтээлээ оруулсны дараа илгээнэ үү.",
+        );
         window.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
@@ -545,10 +554,31 @@ function FilmPicker({
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
+  const [encoding, setEncoding] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
 
-  const busy = progress !== null;
-  const uploaded = Boolean(film.film_url);
+  const busy = progress !== null || encoding;
+  const uploaded = film.film_status === "ready" && Boolean(film.film_url);
+
+  // Pick up an encode that finished while nobody was watching. The upload loop
+  // below only polls for as long as the page stays open, so an entrant who
+  // uploads and immediately closes the tab would otherwise come back to a film
+  // stuck on "processing" forever — and be unable to submit it.
+  useEffect(() => {
+    if (film.film_status !== "processing") return;
+    let mounted = true;
+
+    checkFilmStatus(filmId).then(({ status }) => {
+      if (mounted && status !== "processing") void onUploaded();
+    });
+
+    return () => {
+      mounted = false;
+    };
+    // Deliberately keyed on the film, not on onUploaded: re-running this on
+    // every parent render would poll Bunny on a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filmId, film.film_status]);
 
   const pick = (selected: File | null) => {
     setFailed(null);
@@ -556,7 +586,7 @@ function FilmPicker({
       setFile(null);
       return;
     }
-    const problem = checkFile(selected, "film");
+    const problem = checkFilmFile(selected);
     if (problem) {
       setFailed(problem);
       setFile(null);
@@ -570,14 +600,9 @@ function FilmPicker({
     setFailed(null);
     setProgress(0);
 
-    const result = await uploadChallengeFile({
-      file,
-      filmId,
-      kind: "film",
-      onProgress: setProgress,
-    });
-
+    const result = await uploadFilm({ file, filmId, onProgress: setProgress });
     setProgress(null);
+
     if (!result.ok) {
       setFailed(result.message);
       return;
@@ -585,6 +610,23 @@ function FilmPicker({
 
     setFile(null);
     if (inputRef.current) inputRef.current.value = "";
+
+    // Bunny took the bytes; it has not finished encoding them. Poll until the
+    // stream is actually playable, because that — not the upload finishing — is
+    // when the entry is really in the organiser's hands.
+    setEncoding(true);
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const { status } = await checkFilmStatus(filmId);
+      if (status === "ready") break;
+      if (status === "failed") {
+        setEncoding(false);
+        setFailed("Bunny бичлэгийг боловсруулж чадсангүй. Өөр файл оруулна уу.");
+        await onUploaded();
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+    setEncoding(false);
     await onUploaded();
   };
 
@@ -599,13 +641,22 @@ function FilmPicker({
           <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-brand" />
           <div className="min-w-0">
             <p className="text-xs font-semibold text-white">Бүтээл хүлээн авлаа.</p>
-            <p className="mt-1 break-all text-[11px] text-muted">{film.film_path}</p>
             {film.film_uploaded_at && (
               <p className="mt-1 text-[11px] text-muted">
                 {formatDateTime(film.film_uploaded_at)}
               </p>
             )}
           </div>
+        </div>
+      )}
+
+      {!uploaded && film.film_status === "processing" && !busy && (
+        <div className="mb-3 flex items-start gap-3 rounded-xl border border-white/12 bg-white/[0.02] p-4">
+          <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin text-white/40" />
+          <p className="text-xs text-white/75">
+            Bunny бичлэгийг боловсруулж байна. Хэсэг хугацааны дараа дахин
+            шалгана уу.
+          </p>
         </div>
       )}
 
@@ -645,7 +696,7 @@ function FilmPicker({
               </>
             )}
 
-            {busy && file && (
+            {progress !== null && file && (
               <span className="mt-5 block w-full">
                 <span className="mb-2 flex items-end justify-between">
                   <span className="text-[11px] text-muted">Байршуулж байна…</span>
@@ -657,6 +708,17 @@ function FilmPicker({
                     style={{ width: `${progress}%` }}
                   />
                 </span>
+                <span className="mt-2 block text-[11px] text-muted">
+                  {formatBytes(Math.round((file.size * progress) / 100))} /{" "}
+                  {formatBytes(file.size)}
+                </span>
+              </span>
+            )}
+
+            {encoding && (
+              <span className="mt-5 flex items-center gap-2 text-[11px] text-muted">
+                <Loader2 size={13} className="animate-spin" />
+                Bunny боловсруулж байна…
               </span>
             )}
           </label>
@@ -679,8 +741,16 @@ function FilmPicker({
             ) : (
               <UploadCloud size={14} />
             )}
-            {busy ? "Байршуулж байна…" : "Бичлэг байршуулах"}
+            {progress !== null
+              ? "Байршуулж байна…"
+              : encoding
+                ? "Боловсруулж байна…"
+                : "Бичлэг байршуулах"}
           </button>
+
+          <p className="mt-2 text-[11px] text-muted">
+            Файл серверээр дамжихгүй, шууд Bunny руу очно. Тасарвал үргэлжилнэ.
+          </p>
         </>
       )}
     </div>
