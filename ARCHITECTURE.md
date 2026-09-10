@@ -55,16 +55,52 @@ events/
 │   ├── Navbar.tsx  Brand.tsx
 │   ├── EventList.tsx           татаж, үе шатаар нь бүлэглэнэ
 │   ├── EventCard.tsx  EventDetail.tsx  PhaseBadge.tsx
-│   └── EventListSkeleton.tsx
+│   ├── EventListSkeleton.tsx
+│   └── challenge/
+│       ├── ChallengeShell.tsx    4 алхмын gating, URL-д ?step=N
+│       ├── IntroStep.tsx  ApplicationForm.tsx  FeeStep.tsx
+│       ├── FilmsStep.tsx         ← 4-р алхам: кинонуудын жагсаалт
+│       ├── FilmForm.tsx          нэг киноны маягт + постер/бичлэг upload
+│       └── FormFields.tsx  Stepper.tsx  MyApplications.tsx
 ├── lib/
 │   ├── supabase/{config,client,server}.ts
-│   └── events/{types,api,format}.ts
-└── supabase/migrations/20260729_events_schema.sql
+│   ├── events/{types,api,format}.ts
+│   └── challenge/
+│       ├── {types,api,form,upload}.ts    анкет (challenge_applications)
+│       └── films/{types,api,form}.ts     кино  (challenge_films)
+└── supabase/migrations/
+    ├── 20260729_events_schema.sql
+    ├── 20260907_challenge_applications.sql
+    ├── 20260908_events_anon_challenge_read.sql
+    ├── 20260909_challenge_film_upload.sql
+    └── 20260910_challenge_films_and_payments.sql
 ```
 
 ## 5. Өгөгдлийн загвар
 
-Ганц хүснэгт: `public.events`.
+Дөрвөн хүснэгт: `events`, `challenge_applications`, `challenge_films`,
+`challenge_payments`.
+
+```
+events ──┬── challenge_applications   1 хүн : 1 бүртгэл  (unique event_id,user_id)
+         │        ├── challenge_films      1 бүртгэл : N кино
+         │        └── challenge_payments   QPay нэхэмжлэх
+         └── (энгийн event-үүд, анкетгүй)
+```
+
+**Гол шийдэл: анкет бол ОРОЛЦОГЧ, кино биш.** 20260910 хүртэл киноны талбарууд
+анкетын мөрөн дотор сууж, `unique (event_id, user_id)` нь нэг хүнийг нэг
+киногоор хязгаарлаж байсан. Одоо анкет нь бүртгэл (нэг бүртгэлийн дугаар, нэг
+хураамж), кино бүр `challenge_films`-д тусдаа мөр. Анкет дээрх хуучин `film_*`
+багануудыг **устгаагүй** — 20260910-ийн 6-р хэсэг тэднийг хуулсан, эх нь
+байрандаа үлдсэн тул буцах зам нээлттэй.
+
+`challenge_films`-ийн багана нэрс `public.movies`-тэй **зориуд ижил**
+(`poster_url`, `horizontal_poster_url`, `director`, `actors`, `studio`,
+`age_rating`, `duration_minutes`, `trailer_url`). Ялагчийг каталог руу оруулах
+нь нэг `insert into movies … select … from challenge_films` болно.
+
+### `public.events`
 
 ```
 id  name  slug  subtitle  description
@@ -112,19 +148,31 @@ Service role key зөвхөн `lib/supabase/server.ts` дотор, тэр нь `
 
 ### 7.1 Одоо хэрэглэж байгаа: Bunny **Storage**, server-ээр дамжина
 
-Уралдааны бүтээл (`/challenge/[slug]` 4-р алхам) үүгээр явна.
-`see_media_admin/app/api/admin/bunny/upload/route.ts`-ийн яг хуулбар:
+Уралдааны постер ба бүтээл (`/challenge/[slug]` 4-р алхам) үүгээр явна.
+`see_media_admin/app/api/admin/bunny/upload/route.ts`-ийн яг хуулбар. Нэг route
+гурван төрлийг `kind` талбараар ялгана: `poster`, `horizontal_poster`, `film`.
 
 ```
 Browser → POST /api/challenge/upload   (multipart, Authorization: Bearer <token>)
+                                        file, filmId, kind
 Server  → getUser(token)-оор дуудагчийг батална
-        → challenge_applications-аас (event_id, user_id)-ийн мөрийг олно,
-          status = paid эсэхийг шалгана
-        → PUT https://<endpoint>/<zone>/campaign_reels/<event>/<application>/film-<ts>.mp4
+        → challenge_films → challenge_applications → events гэж уншаад:
+            эзэмшигч мөн үү, анкет paid уу, submission_ends_at гараагүй юу,
+            кино хянагдаж эхлээгүй юу
+          (service role RLS-ийг тойрдог тул policy-гийн шалгалт бүрийг ЭНД
+           давтах ёстой)
+        → PUT https://<endpoint>/<zone>/campaign_reels/<event>/<application>/<film>/<kind>-<ts>.<ext>
           headers: AccessKey: BUNNY_STORAGE_ACCESS_KEY
-        → service role-оор film_file_url / film_file_path / status = 'uploaded' бичнэ
+        → kind = film бол service role-оор film_url / film_path /
+          film_status = 'ready' / film_uploaded_at бичнэ
+          kind = poster* бол ЮУ Ч БИЧИХГҮЙ — URL-ыг буцаана, client өөрөө
+          poster_url-даа хадгална (тэр багана нь client-ийн grant дотор)
         → буцаана { url, path }
 ```
+
+Постер яагаад client талаас хадгалагддаг вэ: постер сонгоод маягтаа орхисон
+хүний **хадгалагдсан** бүртгэл чимээгүй өөрчлөгдөх ёсгүй. Үнэ нь storage зон
+дотор хэн ч заагаагүй объект үлдэх — хямд тал нь.
 
 Bunny **Stream биш**: video object, transcode, HLS байхгүй. Файл нь storage zone
 дотор энгийн объект болж хэвтээд `BUNNY_CDN_BASE_URL`-ээс шууд дамжина —
@@ -204,6 +252,19 @@ key ч байхгүй.
 - **Админ UI.** Одоогоор Supabase SQL editor-оос гараар мөр нэмнэ. Дараа нь `see_media_admin`-д `/admin/events` нэмэх нь зөв — санамж: тэр төсөл дээр `npm run route:generate` эвдэрсэн, `routeTree.gen.ts`-ийг гараар засна.
 - **Оролцогчийн бүртгэл.** Хийгдсэн — `challenge_applications`
   (20260907_challenge_applications.sql) + `/challenge/[slug]` 4 алхамт урсгал.
+- **Нэг хүн олон кино.** Хийгдсэн — `challenge_films`
+  (20260910_challenge_films_and_payments.sql) + `FilmsStep` / `FilmForm`.
+- **QPay.** Хийгдсэн — хоёр edge function
+  (`supabase/functions/challenge-payment-{create,callback}`), тавих заавар
+  [docs/QPAY_SETUP.md](docs/QPAY_SETUP.md). Web болон mobile ХОЁУЛАА яг тэр
+  хоёрыг дууддаг тул логик нэг газар байна. Дүн `events.entry_fee`-ээс сервер
+  дээр уншигдана; callback-д зөвхөн `transactionId` явна — дүн query param-аар
+  явбал хэн ч 1₮ төлөөд бүртгүүлнэ. Тусдаа status endpoint байхгүй: callback
+  идэмхий биш тул түүнийг түлхэх нь өөрөө poll болно, эцсийн хариуг
+  `challenge_payments`-ээс RLS-ээр шууд уншина. Төлбөр батлагдмагц анкет `paid`
+  болж, `registration_no` олгогдож, и-баримт имэйлээр явна.
+- **Админ панел.** `challenge_films`-ийг хараахан мэдэхгүй — өргөдөл нээхэд доор
+  нь кинонуудын жагсаалт, CSV нь кино тус бүрээр нэг мөр болох ёстой.
 - **Санал хураалт.** `event_votes (event_id, entry_id, user_id)` + `unique(entry_id, user_id)` — нэг хүн нэг удаа.
 - **Видео тоглуулах.** Тоглуулах URL-ыг `events` дээр бүү тавь — **тусдаа `event_media` хүснэгтэд, policy огт үүсгэлгүй** байрлуул. Тэгвэл `select` бичихдээ алдсан ч гоожихгүй; `movies` дээр `hls_url` ижил мөрөн дээрээ байгаа болохоор `MOVIE_COLUMNS`-оос мартаж гаргавал шууд алдана. Дараа нь `/api/events/stream` нь `landing/app/api/watch/stream/route.ts`-ийг хуулж хийнэ.
 - **Slug URL.** `slug` багана бэлэн; `/events/[id]`-г `/events/[slug]` болгоход л хангалттай.

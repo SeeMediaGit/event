@@ -39,3 +39,9 @@ export const SUPABASE_ANON_KEY = required(
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY,
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY",
 );
+
+// Edge functions live under the same project host. The challenge fee's QPay
+// invoice is created and confirmed there rather than in a Next route, so that
+// the mobile app can call exactly the same two functions — one implementation,
+// two clients.
+export const SUPABASE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;

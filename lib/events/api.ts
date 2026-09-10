@@ -32,6 +32,8 @@ const EVENT_COLUMNS = [
   "rules",
   "show_on_home",
   "registration_prefix",
+  // 20260910_challenge_films_and_payments.sql
+  "max_films_per_user",
 ].join(", ");
 
 // RLS on public.events already restricts reads to status = 'published' for

@@ -2,13 +2,13 @@
 
 import { getSupabaseBrowserClient } from "../supabase/client";
 
-// Client half of the film upload, mirroring
+// Client half of the challenge uploads, mirroring
 // see_media_admin/lib/bunnyUpload.ts: attach the Supabase access token, post a
 // multipart body to our own route, and let that route talk to Bunny.
 //
 // XMLHttpRequest rather than fetch — the one thing this differs on. fetch gives
-// no upload progress, and a film is not a poster: a hundred-megabyte upload with
-// no progress bar is indistinguishable from a hung page.
+// no upload progress, and a film is not a poster: a hundred-megabyte upload
+// with no progress bar is indistinguishable from a hung page.
 
 export const ACCEPTED_FILM_TYPES = [
   "video/mp4",
@@ -17,7 +17,12 @@ export const ACCEPTED_FILM_TYPES = [
   "video/x-matroska",
 ];
 
+export const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
 export const MAX_FILM_SIZE = 200 * 1024 * 1024;
+export const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+
+export type UploadKind = "poster" | "horizontal_poster" | "film";
 
 export type UploadResult =
   | { ok: true; url: string; path: string }
@@ -30,13 +35,33 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-export async function uploadFilm({
+// Checked here as well as in the route. The route is the one that counts — this
+// copy just saves the entrant a long upload that ends in a refusal.
+export function checkFile(file: File, kind: UploadKind): string | null {
+  const isFilm = kind === "film";
+  const types = isFilm ? ACCEPTED_FILM_TYPES : ACCEPTED_IMAGE_TYPES;
+  const max = isFilm ? MAX_FILM_SIZE : MAX_IMAGE_SIZE;
+
+  if (!types.includes(file.type)) {
+    return isFilm
+      ? "Зөвхөн MP4, MOV, WebM, MKV бичлэг оруулах боломжтой."
+      : "Зөвхөн JPG, PNG, WebP зураг оруулах боломжтой.";
+  }
+  if (file.size > max) {
+    return `Файл ${formatBytes(max)}-аас бага байх ёстой. Сонгосон файл: ${formatBytes(file.size)}.`;
+  }
+  return null;
+}
+
+export async function uploadChallengeFile({
   file,
-  eventId,
+  filmId,
+  kind,
   onProgress,
 }: {
   file: File;
-  eventId: string;
+  filmId: string;
+  kind: UploadKind;
   onProgress?: (percent: number) => void;
 }): Promise<UploadResult> {
   const supabase = getSupabaseBrowserClient();
@@ -50,7 +75,8 @@ export async function uploadFilm({
 
   const body = new FormData();
   body.append("file", file);
-  body.append("eventId", eventId);
+  body.append("filmId", filmId);
+  body.append("kind", kind);
 
   return new Promise<UploadResult>((resolve) => {
     const xhr = new XMLHttpRequest();
@@ -81,7 +107,10 @@ export async function uploadFilm({
       if (xhr.status === 413) {
         resolve({
           ok: false,
-          message: "Файл хэт том байна. Багасгаад дахин оролдоно уу.",
+          message:
+            kind === "film"
+              ? "Файл хэт том байна. Одоогоор 4.5MB-аас том бичлэг серверээр дамжихгүй."
+              : "Зураг хэт том байна. Багасгаад дахин оролдоно уу.",
         });
         return;
       }

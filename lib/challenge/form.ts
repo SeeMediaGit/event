@@ -79,16 +79,29 @@ export const EMPTY_FORM: ApplicationFormState = {
 
 // Prefill from the signed-in user's profile. Only fills blanks, so a saved
 // draft always wins over whatever is on the profile.
+// `unknown` on purpose rather than `string | null`. profiles.phone is an
+// integer column, and trusting a hand-written type here is exactly what threw
+// "phone.trim is not a function" in production. AuthProvider now coerces on the
+// way in; this coerces again so the form cannot be broken by a column whose
+// type changes underneath it.
+function profileText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "bigint") {
+    return String(value);
+  }
+  return "";
+}
+
 export function prefillFromProfile(
   form: ApplicationFormState,
-  profile: { full_name: string | null; phone: string | null } | null,
-  email: string | null,
+  profile: { full_name?: unknown; phone?: unknown } | null,
+  email: unknown,
 ): ApplicationFormState {
   return {
     ...form,
-    full_name: form.full_name || profile?.full_name?.trim() || "",
-    phone: form.phone || profile?.phone?.trim() || "",
-    email: form.email || email?.trim() || "",
+    full_name: form.full_name || profileText(profile?.full_name),
+    phone: form.phone || profileText(profile?.phone),
+    email: form.email || profileText(email),
   };
 }
 

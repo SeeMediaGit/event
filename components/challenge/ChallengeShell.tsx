@@ -19,10 +19,10 @@ import type { SeeEvent } from "@/lib/events/types";
 import ApplicationForm from "./ApplicationForm";
 import FeeStep from "./FeeStep";
 import IntroStep from "./IntroStep";
+import FilmsStep from "./FilmsStep";
 import Stepper, { type StepState } from "./Stepper";
-import UploadStep from "./UploadStep";
 
-const STEP_LABELS = ["Танилцуулга", "Анкет", "Суурь хураамж", "Бүтээл"];
+const STEP_LABELS = ["Танилцуулга", "Анкет", "Суурь хураамж", "Кинонууд"];
 const FIRST_STEP = 1;
 const LAST_STEP = 4;
 
@@ -148,6 +148,21 @@ export default function ChallengeShell({ slug }: { slug: string }) {
     };
   });
 
+  // The payment callback writes status / paid_at / registration_no under the
+  // service role, so the row is re-read rather than patched locally — that read
+  // is what proves the registration number was actually issued.
+  const reloadApplication = useCallback(async () => {
+    if (!eventId) return;
+    const result = await fetchMyApplication(eventId);
+    if (!result.ok) {
+      setAppError(result.message);
+      return;
+    }
+    setApplication(result.application);
+    setAppError(null);
+    if (statusRank(result.application?.status ?? null) >= 2) goToStep(4);
+  }, [eventId, goToStep]);
+
   // Submitting the application is what unlocks the fee step; move there rather
   // than leaving the applicant on a form that just turned read-only.
   const handleSaved = useCallback(
@@ -244,14 +259,14 @@ export default function ChallengeShell({ slug }: { slug: string }) {
               />
             )}
             {step === 3 && (
-              <FeeStep event={load.event} application={application} />
-            )}
-            {step === 4 && (
-              <UploadStep
+              <FeeStep
                 event={load.event}
                 application={application}
-                onUploaded={setApplication}
+                onPaid={reloadApplication}
               />
+            )}
+            {step === 4 && (
+              <FilmsStep event={load.event} application={application} />
             )}
           </>
         )}

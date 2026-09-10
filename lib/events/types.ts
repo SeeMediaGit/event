@@ -39,6 +39,12 @@ export type SeeEvent = {
   rules: string | null;
   show_on_home: boolean;
   registration_prefix: string | null;
+
+  // 20260910_challenge_films_and_payments.sql. NULL = no cap on how many films
+  // one entrant may send. Enforced by the UI and the upload route rather than
+  // by a policy — counting rows inside RLS would re-scan every film on each
+  // insert.
+  max_films_per_user: number | null;
 };
 
 export function isChallenge(event: SeeEvent): boolean {

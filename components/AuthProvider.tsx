@@ -23,6 +23,33 @@ export type AppUser = {
   phone: string | null;
 };
 
+// public.profiles does not store these as text. `phone` is an integer column
+// (88166788, not "88166788") and `username` often holds the same digits, so
+// PostgREST hands back a number and anything that calls .trim() on it throws
+// "phone.trim is not a function".
+//
+// Coercing once here, at the edge, is what keeps that from being every
+// consumer's problem — the AppUser above is then true for the whole app.
+function asText(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "bigint") {
+    return String(value);
+  }
+  return null;
+}
+
+function toAppUser(row: Record<string, unknown> | null): AppUser | null {
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    full_name: asText(row.full_name),
+    username: asText(row.username),
+    avatar_url: asText(row.avatar_url),
+    phone: asText(row.phone),
+  };
+}
+
 type AuthContextValue = {
   session: Session | null;
   user: User | null;
@@ -72,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq("id", currentUser.id)
         .maybeSingle();
 
-      setAppUser((profile as AppUser) ?? null);
+      setAppUser(toAppUser((profile as Record<string, unknown> | null) ?? null));
     },
     [supabase],
   );
