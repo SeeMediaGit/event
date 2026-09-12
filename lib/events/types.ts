@@ -17,6 +17,13 @@ export type SeeEvent = {
   slug: string | null;
   subtitle: string | null;
   description: string | null;
+  // 20260912120000_events_image_urls.sql — зургууд НЭГ жагсаалт болов.
+  // [0] нь үндсэн зураг, үлдсэн нь танилцуулгын хуудсууд.
+  image_urls: string[];
+
+  // Хуучин ганц зургийн талбарууд. Шинэ зураг эдгээр рүү ОРОХГҮЙ (админ
+  // формоос нуугдсан) — зөвхөн image_urls-ээс өмнө үүссэн мөрүүдийг зурахад
+  // eventImage() тэднийг сүүлчийн аргаар ашиглана.
   poster_url: string | null;
   cover_url: string | null;
   location: string | null;
@@ -99,4 +106,30 @@ export function parseRules(rules: string | null): string[] {
     .split("\n")
     .map((line) => line.replace(/^\s*(?:[-*\u2022]|\d+[.)])\s*/, "").trim())
     .filter((line) => line.length > 0);
+}
+
+// ---------------------------------------------------------------------------
+// Зураг
+//
+// Нэг л газраас шийднэ. Гурван талбарыг дуудаж байгаа газар бүрт
+// `a || b || c` гэж бичих нь хэзээ нэгэн цагт нэг нь мартагдаж, нэг дэлгэц
+// зурагтай нөгөө нь хоосон болоход хүргэдэг.
+// ---------------------------------------------------------------------------
+
+type WithImages = Pick<SeeEvent, "image_urls" | "poster_url" | "cover_url">;
+
+/** Үндсэн зураг: жагсаалт, карт, hero бүгд үүнийг авна. */
+export function eventImage(event: Partial<WithImages>): string | null {
+  return (
+    event.image_urls?.[0] ?? event.cover_url ?? event.poster_url ?? null
+  );
+}
+
+/** Бүх зураг дарааллаараа — танилцуулгын хэсэг үүнийг зурна. */
+export function eventImages(event: Partial<WithImages>): string[] {
+  if (event.image_urls && event.image_urls.length > 0) return event.image_urls;
+  // Хуучин мөр: байгаа зургаа л буцаана, давхардуулахгүй.
+  return [event.cover_url, event.poster_url].filter(
+    (url): url is string => Boolean(url),
+  );
 }

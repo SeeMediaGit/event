@@ -5,8 +5,13 @@ import {
   getSupabaseServiceClient,
 } from "@/lib/supabase/server";
 
-// Step 1 of the film upload: create an empty video object in the Bunny Stream
+// Step 1 of a video upload: create an empty video object in the Bunny Stream
 // library and hand the browser a short-lived signature for it.
+//
+// Serves BOTH videos an entry carries — the film and its trailer — told apart by
+// `kind`. They differ only in which three columns the answer is written to; the
+// ownership checks, the signature and the tus flow are identical, so splitting
+// this into two routes would be two copies of the same rules drifting apart.
 //
 // WHY NOT THROUGH THIS SERVER: the bytes of a film do not fit through a Vercel
 // function — the platform caps a request body at 4.5 MB, so the old
@@ -91,6 +96,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => null);
     const filmId = String(body?.filmId ?? "").trim();
     const fileName = String(body?.fileName ?? "").trim();
+    const kind = body?.kind === "trailer" ? "trailer" : "film";
 
     if (!filmId) {
       return NextResponse.json({ error: "Кино тодорхойгүй байна." }, { status: 400 });
@@ -171,7 +177,11 @@ export async function POST(request: NextRequest) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          title: film.title?.trim() || fileName || `film-${film.id}`,
+          // The title is what an organiser sees in the Bunny dashboard, so it
+          // has to say which of the two videos this is.
+          title: `${kind === "trailer" ? "[Трейлэр] " : ""}${
+            film.title?.trim() || fileName || film.id
+          }`,
           ...(config.collectionId ? { collectionId: config.collectionId } : {}),
         }),
       },
@@ -211,15 +221,25 @@ export async function POST(request: NextRequest) {
     // Point the row at the new video straight away, under the service role —
     // the client holds no grant on any of these columns. `processing` rather
     // than `ready`: the bytes have not been sent yet, let alone encoded.
+    const patch =
+      kind === "trailer"
+        ? {
+            trailer_video_id: videoId,
+            trailer_url: playUrl,
+            trailer_status: "processing",
+            trailer_uploaded_at: null,
+          }
+        : {
+            film_video_id: videoId,
+            film_url: playUrl,
+            film_path: `${config.libraryId}/${videoId}`,
+            film_status: "processing",
+            film_uploaded_at: null,
+          };
+
     const { error: updateError } = await supabase
       .from("challenge_films")
-      .update({
-        film_video_id: videoId,
-        film_url: playUrl,
-        film_path: `${config.libraryId}/${videoId}`,
-        film_status: "processing",
-        film_uploaded_at: null,
-      })
+      .update(patch)
       .eq("id", film.id);
 
     if (updateError) {

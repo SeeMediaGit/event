@@ -7,7 +7,9 @@ import {
   CreditCard,
   Hash,
   Loader2,
+  Plus,
   QrCode,
+  Receipt,
   RefreshCw,
 } from "lucide-react";
 import {
@@ -33,10 +35,15 @@ export default function FeeStep({
   event,
   application,
   onPaid,
+  onAddFilm,
+  onGoToFilms,
 }: {
   event: SeeEvent;
   application: ChallengeApplication | null;
   onPaid: () => void;
+  /** Creates a draft film and opens its form straight away. */
+  onAddFilm: () => void;
+  onGoToFilms: () => void;
 }) {
   const [invoice, setInvoice] = useState<PaymentInvoice | null>(null);
   const [loading, setLoading] = useState(false);
@@ -104,22 +111,46 @@ export default function FeeStep({
   }, [invoice, paid, check]);
 
   // ---------------------------------------------------------------------
-  // Paid
+  // Paid — the moment the entrant has been waiting for.
+  //
+  // This screen used to be skipped: the payment callback flipped the row and
+  // the shell jumped straight to step 4, which meant the person never saw the
+  // registration number they are supposed to keep. Now paying lands here, and
+  // moving on to the films is their own click.
   // ---------------------------------------------------------------------
   if (paid) {
     return (
-      <div className="space-y-5">
-        <div className="rounded-2xl border border-brand/30 bg-brand/5 p-6 text-center sm:p-10">
-          <p className="flex items-center justify-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-brand">
-            <Hash size={13} />
-            Бүртгэлийн дугаар
+      <div className="space-y-6">
+        <div className="relative overflow-hidden rounded-2xl border border-brand/25 bg-ink-surface/60 px-6 py-10 text-center sm:px-10 sm:py-14">
+          {/* The only depth cue in this design: a soft brand bloom, no shadows. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute left-1/2 top-0 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand/10 blur-[80px]"
+          />
+
+          <span className="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full border border-brand/40 bg-brand/10 text-brand shadow-glow">
+            <CheckCircle2 size={30} />
+          </span>
+
+          <h2 className="relative text-2xl font-black tracking-tight text-white sm:text-3xl">
+            Төлбөр баталгаажлаа
+          </h2>
+          <p className="relative mx-auto mt-2 max-w-sm text-xs leading-relaxed text-muted">
+            Та «{event.name}» уралдаанд оролцох эрхээ авлаа.
           </p>
-          <p className="mt-3 break-all text-3xl font-black tracking-tight text-white sm:text-5xl">
-            {application?.registration_no ?? "—"}
-          </p>
-          <p className="mt-4 text-xs text-muted">
-            Энэ дугаараар таны бүтээл бүртгэгдэнэ. Хадгалж авна уу.
-          </p>
+
+          <div className="relative mx-auto mt-8 max-w-md rounded-xl border border-white/10 bg-ink px-5 py-6">
+            <p className="flex items-center justify-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-brand">
+              <Hash size={13} />
+              Бүртгэлийн дугаар
+            </p>
+            <p className="mt-3 break-all font-mono text-3xl font-black tracking-[0.15em] text-white sm:text-5xl">
+              {application?.registration_no ?? "—"}
+            </p>
+            <p className="mt-3 text-xs text-muted">
+              Энэ дугаараар таны бүтээл бүртгэгдэнэ. Хадгалж авна уу.
+            </p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -131,9 +162,27 @@ export default function FeeStep({
         </div>
 
         <p className="flex items-start gap-2 rounded-xl border border-white/12 bg-white/[0.02] px-4 py-3 text-xs text-white/70">
-          <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-brand" />
-          И-баримт таны бүртгэлтэй и-мэйл хаяг руу илгээгдсэн.
+          <Receipt size={14} className="mt-0.5 shrink-0 text-brand" />
+          И-баримт таны бүртгэлтэй и-мэйл хаяг руу илгээгдлээ.
         </p>
+
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <button
+            type="button"
+            onClick={onAddFilm}
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-brand py-3.5 text-sm font-bold text-black shadow-glow transition hover:bg-brand-light"
+          >
+            <Plus size={16} />
+            Эхний киногоо нэмэх
+          </button>
+          <button
+            type="button"
+            onClick={onGoToFilms}
+            className="rounded-xl border border-white/12 px-6 py-3.5 text-sm font-semibold text-white/70 transition hover:border-white/25 hover:text-white"
+          >
+            Дараа нь
+          </button>
+        </div>
       </div>
     );
   }
@@ -202,34 +251,11 @@ export default function FeeStep({
             <p className="mt-4 text-2xl font-black text-white">
               {invoice.amount.toLocaleString("mn-MN")}₮
             </p>
-          </div>
 
-          {invoice.urls.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs font-semibold text-white/70">
-                Эсвэл банкны аппаа сонгоно уу
-              </p>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {invoice.urls.map((bank) => (
-                  <a
-                    key={bank.name}
-                    href={bank.link}
-                    className="flex items-center gap-2 rounded-xl border border-white/10 bg-ink px-3 py-2.5 text-xs font-semibold text-white/80 transition hover:border-brand/40 hover:text-white"
-                  >
-                    {bank.logo && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={bank.logo}
-                        alt=""
-                        className="h-5 w-5 shrink-0 rounded"
-                      />
-                    )}
-                    <span className="truncate">{bank.name}</span>
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
+            <p className="mt-2 text-[11px] text-muted">
+              Утсандаа QPay эсвэл банкны аппаа нээгээд энэ кодыг уншуулна уу.
+            </p>
+          </div>
 
           <button
             type="button"

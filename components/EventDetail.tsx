@@ -7,6 +7,7 @@ import { ArrowLeft, CalendarDays, Clock, MapPin, Trophy } from "lucide-react";
 import { fetchEventById } from "@/lib/events/api";
 import { formatDateRange, formatDateTime, formatLongDate } from "@/lib/events/format";
 import {
+  eventImage,
   getEventPhase,
   isRegistrationOpen,
   type SeeEvent,
@@ -61,7 +62,7 @@ export default function EventDetail({ eventId }: { eventId: string }) {
   const { event } = state;
   const phase = getEventPhase(event);
   const registrationOpen = isRegistrationOpen(event);
-  const hero = event.cover_url || event.poster_url;
+  const hero = eventImage(event);
 
   return (
     <article>

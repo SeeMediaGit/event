@@ -4,11 +4,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { CalendarDays, MapPin, Trophy } from "lucide-react";
 import { formatCountdown, formatDateRange } from "@/lib/events/format";
-import { eventHref, getEventPhase, type SeeEvent } from "@/lib/events/types";
+import { eventHref, getEventPhase, type SeeEvent, eventImage } from "@/lib/events/types";
 import PhaseBadge from "./PhaseBadge";
 
 export default function EventCard({ event }: { event: SeeEvent }) {
   const phase = getEventPhase(event);
+  const image = eventImage(event);
   const countdown =
     phase === "upcoming" ? formatCountdown(event.starts_at) : "";
 
@@ -20,9 +21,9 @@ export default function EventCard({ event }: { event: SeeEvent }) {
       className="group flex flex-col overflow-hidden rounded-2xl border border-white/8 bg-ink-surface/70 transition hover:border-brand/40 hover:shadow-glow"
     >
       <div className="relative aspect-[16/9] w-full overflow-hidden bg-ink-elevated">
-        {event.poster_url ? (
+        {image ? (
           <Image
-            src={event.poster_url}
+            src={image}
             alt={event.name}
             fill
             sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"

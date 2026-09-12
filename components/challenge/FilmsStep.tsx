@@ -1,15 +1,16 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Clapperboard,
   Clock,
   FileVideo,
+  Hash,
   Loader2,
   Plus,
-  Video,
 } from "lucide-react";
 import { createFilm, fetchMyFilms } from "@/lib/challenge/films/api";
 import { buildFilmFields, EMPTY_FILM_FORM } from "@/lib/challenge/films/form";
@@ -40,6 +41,13 @@ export default function FilmsStep({
 
   const applicationId = application?.id ?? null;
   const open = isSubmissionOpen(event);
+
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const wantsAdd = searchParams.get("add") === "1";
+  // One-shot: the flag is consumed on arrival and stripped from the URL, so a
+  // refresh or a Back does not silently create another empty draft.
+  const consumedAdd = useRef(false);
 
   useEffect(() => {
     if (!applicationId) {
@@ -88,6 +96,22 @@ export default function FilmsStep({
     setFilms((prev) => [...(prev ?? []), result.film]);
     setEditing(result.film);
   }, [applicationId, creating, event.id]);
+
+  // "Эхний киногоо нэмэх" on the payment screen lands here with ?add=1.
+  useEffect(() => {
+    if (!wantsAdd || consumedAdd.current) return;
+    if (!applicationId || films === null || !open) return;
+    consumedAdd.current = true;
+
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("add");
+    router.replace(`?${params.toString()}`, { scroll: false });
+
+    void addFilm();
+    // addFilm is stable enough for this one-shot; adding it would re-run the
+    // effect on every films change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsAdd, applicationId, films, open]);
 
   const handleSaved = useCallback((saved: ChallengeFilm) => {
     setFilms((prev) =>
@@ -141,7 +165,17 @@ export default function FilmsStep({
 
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-sm font-bold text-white">Миний кинонууд</h2>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h2 className="text-sm font-bold text-white">Миний кинонууд</h2>
+            {/* The number lived only on the fee step, so anyone coming back had
+                to walk backwards through the stepper to find it. */}
+            {application.registration_no && (
+              <span className="inline-flex items-center gap-1 rounded-lg border border-brand/30 bg-brand/10 px-2 py-0.5 font-mono text-[11px] font-bold tracking-wider text-brand-light">
+                <Hash size={11} />
+                {application.registration_no}
+              </span>
+            )}
+          </div>
           <p className="mt-1 text-xs text-muted">
             {limit === null
               ? "Хэдэн ч кино оруулж болно."
@@ -193,30 +227,57 @@ export default function FilmsStep({
         </p>
       )}
 
+      {/* Grid, not a list: in a film competition the poster is the content, and
+          a 48px thumbnail in a row throws it away. */}
       {films === null ? (
-        <div className="space-y-3">
-          {Array.from({ length: 2 }).map((_, i) => (
-            <div key={i} className="h-[104px] animate-pulse rounded-2xl bg-white/5" />
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="aspect-[2/3] animate-pulse rounded-2xl bg-white/5" />
           ))}
         </div>
-      ) : films.length === 0 ? (
-        <Empty
-          icon={<Video size={30} className="mb-4 text-white/20" />}
-          title="Кино алга"
-          note="«Кино нэмэх» дарж эхний бүтээлээ бүртгүүлнэ үү."
-        />
       ) : (
-        <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {films.map((film) => (
-            <FilmRow key={film.id} film={film} onOpen={() => setEditing(film)} />
+            <FilmCard key={film.id} film={film} onOpen={() => setEditing(film)} />
           ))}
+
+          {open && !atLimit && (
+            <button
+              type="button"
+              onClick={addFilm}
+              disabled={creating}
+              className="flex aspect-[2/3] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/15 bg-white/[0.02] px-4 text-center transition hover:border-brand/40 hover:bg-brand/[0.03] disabled:opacity-50"
+            >
+              <span className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-ink text-white/40">
+                {creating ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Plus size={18} />
+                )}
+              </span>
+              <span className="text-xs font-semibold text-white/80">
+                {films.length === 0 ? "Эхний киногоо нэмэх" : "Кино нэмэх"}
+              </span>
+              <span className="text-[11px] leading-relaxed text-muted">
+                Постер, мэдээлэл, бичлэг
+              </span>
+            </button>
+          )}
         </div>
+      )}
+
+      {films !== null && films.length === 0 && !open && (
+        <Empty
+          icon={<Clapperboard size={30} className="mb-4 text-white/20" />}
+          title="Кино алга"
+          note="Бүтээл хүлээн авах хугацаа дууссан тул шинээр нэмэх боломжгүй."
+        />
       )}
     </div>
   );
 }
 
-function FilmRow({
+function FilmCard({
   film,
   onOpen,
 }: {
@@ -226,49 +287,56 @@ function FilmRow({
   // film_url is written when the upload ticket is issued, before any bytes
   // exist — only film_status says whether there is a playable stream.
   const hasVideo = film.film_status === "ready";
+  const incomplete = !film.title || !film.poster_url;
 
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full items-center gap-4 rounded-2xl border border-white/8 bg-ink-surface/60 p-3 text-left transition hover:border-brand/25 sm:p-4"
+      className="group relative flex aspect-[2/3] flex-col justify-end overflow-hidden rounded-2xl border border-white/8 bg-ink-surface/60 text-left transition hover:border-brand/30"
     >
-      <span className="relative h-[72px] w-[48px] shrink-0 overflow-hidden rounded-lg border border-white/8 bg-ink">
-        {film.poster_url ? (
-          <Image
-            src={film.poster_url}
-            alt={film.title ?? "Постер"}
-            fill
-            sizes="48px"
-            className="object-cover"
-          />
-        ) : (
-          <span className="flex h-full w-full items-center justify-center">
-            <FileVideo size={16} className="text-white/20" />
-          </span>
-        )}
-      </span>
+      {film.poster_url ? (
+        <Image
+          src={film.poster_url}
+          alt={film.title ?? "Постер"}
+          fill
+          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 240px"
+          className="object-cover transition duration-300 group-hover:scale-[1.03]"
+        />
+      ) : (
+        <span className="absolute inset-0 flex items-center justify-center bg-ink-elevated">
+          <FileVideo size={26} className="text-white/15" />
+        </span>
+      )}
 
-      <span className="min-w-0 flex-1">
+      {/* Bottom-up scrim so the title stays readable over any poster. */}
+      <span className="pointer-events-none absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black via-black/70 to-transparent" />
+
+      <span className="relative space-y-1.5 p-3">
         <span className="block truncate text-sm font-bold text-white">
           {film.title || "Нэргүй кино"}
         </span>
-        <span className="mt-0.5 block truncate text-xs text-muted">
-          {[film.director, film.release_year, film.duration_minutes && `${film.duration_minutes} мин`]
+        <span className="block truncate text-[11px] text-white/60">
+          {[
+            film.director,
+            film.release_year,
+            film.duration_minutes && `${film.duration_minutes} мин`,
+          ]
             .filter(Boolean)
             .join(" · ") || "Мэдээлэл дутуу"}
         </span>
-        <span className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-white/70">
+
+        <span className="flex flex-wrap items-center gap-1">
+          <span className="rounded-full border border-white/15 bg-black/50 px-1.5 py-0.5 text-[10px] font-semibold text-white/80 backdrop-blur">
             {FILM_STATUS_LABEL[film.status]}
           </span>
           <span
-            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+            className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold backdrop-blur ${
               hasVideo
-                ? "border border-brand/30 bg-brand/10 text-brand-light"
+                ? "border border-brand/40 bg-brand/15 text-brand-light"
                 : film.film_status === "failed"
-                  ? "border border-red-500/30 bg-red-500/10 text-red-300"
-                  : "border border-white/10 bg-white/5 text-white/50"
+                  ? "border border-red-500/40 bg-red-500/15 text-red-300"
+                  : "border border-white/15 bg-black/50 text-white/60"
             }`}
           >
             {hasVideo
@@ -276,11 +344,22 @@ function FilmRow({
               : film.film_status === "processing"
                 ? "Боловсруулж байна"
                 : film.film_status === "failed"
-                  ? "Бичлэг амжилтгүй"
+                  ? "Амжилтгүй"
                   : "Бичлэг ороогүй"}
           </span>
+          {film.trailer_status === "ready" && (
+            <span className="rounded-full border border-white/15 bg-black/50 px-1.5 py-0.5 text-[10px] font-semibold text-white/70 backdrop-blur">
+              Трейлэртэй
+            </span>
+          )}
         </span>
       </span>
+
+      {incomplete && (
+        <span className="absolute right-2 top-2 rounded-full border border-amber-400/40 bg-amber-400/15 px-2 py-0.5 text-[10px] font-semibold text-amber-200 backdrop-blur">
+          Дутуу
+        </span>
+      )}
     </button>
   );
 }

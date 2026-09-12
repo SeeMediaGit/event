@@ -10,6 +10,7 @@ import {
 } from "@/lib/challenge/api";
 import { STATUS_LABEL, statusRank } from "@/lib/challenge/types";
 import { formatDateTime } from "@/lib/events/format";
+import { eventImage } from "@/lib/events/types";
 
 // Everything the signed-in user has applied to. RLS scopes the table to their
 // own rows, so there is no user filter here and no way for this list to widen.
@@ -71,9 +72,9 @@ export default function MyApplications() {
             className="group flex items-center gap-4 rounded-2xl border border-white/8 bg-ink-surface/70 p-4 transition hover:border-brand/40"
           >
             <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-ink-elevated">
-              {row.event?.poster_url ? (
+              {row.event && eventImage(row.event) ? (
                 <Image
-                  src={row.event.poster_url}
+                  src={eventImage(row.event)!}
                   alt=""
                   fill
                   sizes="56px"

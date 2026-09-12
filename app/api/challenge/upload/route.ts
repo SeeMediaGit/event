@@ -37,7 +37,11 @@ export const dynamic = "force-dynamic";
 // rename the folder in the storage zone.
 const CAMPAIGN_FOLDER = "campaign_reels";
 
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+// 4 MB, not 10: a Vercel function's request body is capped at 4.5 MB by the
+// platform, so anything above that is rejected before this route runs and the
+// browser sees a bare 413. The client shrinks posters below this first
+// (lib/challenge/compressImage.ts); this is the backstop.
+const MAX_IMAGE_SIZE = 4 * 1024 * 1024;
 
 const ALLOWED_IMAGE_TYPES = new Map<string, string>([
   ["image/jpeg", "jpg"],
@@ -156,7 +160,7 @@ export async function POST(request: NextRequest) {
     }
     if (file.size > MAX_IMAGE_SIZE) {
       return NextResponse.json(
-        { error: "Зураг 10MB-аас бага байх ёстой." },
+        { error: "Зураг 4MB-аас бага байх ёстой." },
         { status: 413 },
       );
     }

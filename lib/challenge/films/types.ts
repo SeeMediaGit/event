@@ -55,7 +55,13 @@ export type ChallengeFilm = {
   genre_other: string | null;
   duration_minutes: number | null;
 
+  // 20260912_challenge_trailer_upload.sql. The trailer is a Bunny Stream video
+  // too, not a link the entrant pastes: a pasted link can be taken down or made
+  // private after judging starts. Written by the upload route, like the film.
   trailer_url: string | null;
+  trailer_video_id: string | null;
+  trailer_status: FilmFileStatus;
+  trailer_uploaded_at: string | null;
 
   // Written by the upload route under the service role — the client holds no
   // grant on any of these four.
@@ -95,6 +101,9 @@ export function isFilmLocked(status: FilmStatus): boolean {
 
 // A submitted film needs its video; a draft does not. Used by the list to show
 // what is still missing before the deadline.
+//
+// The trailer is deliberately NOT required here — an entry stands or falls on
+// the film itself.
 export function isFilmComplete(film: ChallengeFilm): boolean {
   return (
     film.status !== "draft" &&

@@ -9,6 +9,7 @@ import {
   CalendarDays,
   Clock,
   Film,
+  Image as ImageIcon,
   ListChecks,
   LogIn,
   Ticket,
@@ -17,6 +18,8 @@ import {
 import PhaseBadge from "@/components/PhaseBadge";
 import { formatDateTime, formatLongDate } from "@/lib/events/format";
 import {
+  eventImage,
+  eventImages,
   getEventPhase,
   isRegistrationOpen,
   parseRules,
@@ -47,7 +50,9 @@ export default function IntroStep({
   const phase = getEventPhase(event);
   const registrationOpen = isRegistrationOpen(event);
   const rules = parseRules(event.rules);
-  const artwork = event.cover_url || event.poster_url;
+  const artwork = eventImage(event);
+  // Бүх зураг: [0] нь hero дээр гарсан тул танилцуулгын хэсэг үлдсэнийг зурна.
+  const promo = eventImages(event).slice(1);
 
   return (
     <div className="space-y-8">
@@ -75,8 +80,8 @@ export default function IntroStep({
           }`}
         >
           <Hero3D
-            posterUrl={event.poster_url}
-            coverUrl={event.cover_url}
+            posterUrl={artwork}
+            coverUrl={eventImages(event)[1] ?? artwork}
             onReady={() => setCanvasReady(true)}
           />
         </div>
@@ -154,6 +159,34 @@ export default function IntroStep({
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {/* Зохион байгуулагчийн зарын хуудсууд. Эхний зураг hero дээр гарсан тул
+          энд орохгүй. Дүрмийг текстээр давхардуулахгүй — эдгээр зураг ихэвчлэн
+          бүрэн мэдээлэлтэй байдаг. */}
+      {promo.length > 0 && (
+        <section className="space-y-4">
+          <h2 className="flex items-center gap-2 text-sm font-bold text-white">
+            <ImageIcon size={15} />
+            Уралдааны зар
+          </h2>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {promo.map((url, i) => (
+              <div
+                key={url}
+                className="relative aspect-square w-full overflow-hidden rounded-2xl border border-white/8 bg-ink-elevated"
+              >
+                <Image
+                  src={url}
+                  alt={`${event.name} — ${i + 2}`}
+                  fill
+                  sizes="(max-width: 640px) 100vw, 480px"
+                  className="object-cover"
+                />
+              </div>
+            ))}
+          </div>
         </section>
       )}
 

@@ -3,7 +3,8 @@
 import * as tus from "tus-js-client";
 import { getSupabaseBrowserClient } from "../../supabase/client";
 
-// Film upload, browser → Bunny Stream directly.
+// Video upload, browser → Bunny Stream directly. Serves both videos an entry
+// carries: the film and its trailer.
 //
 // The bytes never touch our server. /api/challenge/film-ticket creates the
 // video object and returns a signature that authorises writing to THAT ONE
@@ -31,6 +32,8 @@ export const ACCEPTED_FILM_TYPES = [
 // 50 MB chunks. Small enough that a dropped connection loses little, large
 // enough that a 2 GB film is ~40 requests rather than hundreds.
 const CHUNK_SIZE = 50 * 1024 * 1024;
+
+export type VideoKind = "film" | "trailer";
 
 export type FilmUploadResult =
   | { ok: true }
@@ -73,10 +76,12 @@ type Ticket = {
 export async function uploadFilm({
   file,
   filmId,
+  kind = "film",
   onProgress,
 }: {
   file: File;
   filmId: string;
+  kind?: VideoKind;
   onProgress?: (percent: number) => void;
 }): Promise<FilmUploadResult> {
   const token = await accessToken();
@@ -94,7 +99,7 @@ export async function uploadFilm({
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ filmId, fileName: file.name }),
+      body: JSON.stringify({ filmId, kind, fileName: file.name }),
     });
     const body = await res.json().catch(() => null);
     if (!res.ok) {
@@ -158,6 +163,7 @@ export type FilmEncodeStatus = "pending" | "processing" | "ready" | "failed";
 // the entry is really in.
 export async function checkFilmStatus(
   filmId: string,
+  kind: VideoKind = "film",
 ): Promise<{ status: FilmEncodeStatus; encodeProgress: number | null }> {
   const token = await accessToken();
   if (!token) return { status: "processing", encodeProgress: null };
@@ -169,7 +175,7 @@ export async function checkFilmStatus(
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ filmId }),
+      body: JSON.stringify({ filmId, kind }),
     });
     const body = await res.json().catch(() => null);
     if (!res.ok) return { status: "processing", encodeProgress: null };

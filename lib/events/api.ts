@@ -13,6 +13,8 @@ const EVENT_COLUMNS = [
   "slug",
   "subtitle",
   "description",
+  // 20260912120000_events_image_urls.sql
+  "image_urls",
   "poster_url",
   "cover_url",
   "location",

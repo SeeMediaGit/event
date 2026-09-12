@@ -25,9 +25,6 @@ export type FilmFormState = {
   genre: string[];
   genre_other: string;
   duration_minutes: string;
-
-  // Линк
-  trailer_url: string;
 };
 
 export const EMPTY_FILM_FORM: FilmFormState = {
@@ -44,7 +41,6 @@ export const EMPTY_FILM_FORM: FilmFormState = {
   genre: [],
   genre_other: "",
   duration_minutes: "",
-  trailer_url: "",
 };
 
 export function formFromFilm(row: ChallengeFilm): FilmFormState {
@@ -63,7 +59,6 @@ export function formFromFilm(row: ChallengeFilm): FilmFormState {
     genre_other: row.genre_other ?? "",
     duration_minutes:
       row.duration_minutes === null ? "" : String(row.duration_minutes),
-    trailer_url: row.trailer_url ?? "",
   };
 }
 
@@ -72,7 +67,9 @@ export function formFromFilm(row: ChallengeFilm): FilmFormState {
 // ---------------------------------------------------------------------------
 
 // Exactly the columns `authenticated` holds an UPDATE grant on in
-// 20260910_challenge_films_and_payments.sql, and nothing else. Adding a key
+// 20260910_challenge_films_and_payments.sql, MINUS trailer_url, whose grant
+// 20260912_challenge_trailer_upload.sql took back when the trailer became an
+// uploaded video rather than a pasted link. Adding a key
 // here that is not in that grant does not fail on that one column — PostgREST
 // rejects the whole request with 42501, so the save silently stops working.
 export type FilmFields = {
@@ -89,7 +86,6 @@ export type FilmFields = {
   genre: string[];
   genre_other: string | null;
   duration_minutes: number | null;
-  trailer_url: string | null;
 };
 
 function text(value: string): string | null {
@@ -125,7 +121,6 @@ export function buildFilmFields(form: FilmFormState): FilmFields {
     genre: form.genre,
     genre_other: genreOther ? text(form.genre_other) : null,
     duration_minutes: int(form.duration_minutes),
-    trailer_url: text(form.trailer_url),
   };
 }
 
@@ -135,17 +130,6 @@ export function buildFilmFields(form: FilmFormState): FilmFields {
 // ---------------------------------------------------------------------------
 
 export type FilmFieldErrors = Partial<Record<keyof FilmFormState, string>>;
-
-// A trailer is optional, but a link that is present has to be a link. Anything
-// else lands in the organiser's export as text nobody can click.
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 export function validateFilmForSubmit(form: FilmFormState): FilmFieldErrors {
   const errors: FilmFieldErrors = {};
@@ -178,9 +162,6 @@ export function validateFilmForSubmit(form: FilmFormState): FilmFieldErrors {
   else if (minutes < 1 || minutes > 1000)
     errors.duration_minutes = "Хугацаа 1–1000 минут хооронд байна.";
 
-  if (form.trailer_url.trim() && !isHttpUrl(form.trailer_url.trim()))
-    errors.trailer_url = "Линк http:// эсвэл https:// -ээр эхлэх ёстой.";
-
   return errors;
 }
 
@@ -200,5 +181,4 @@ export const SECTION_OF_FILM_FIELD: Record<keyof FilmFormState, number> = {
   genre: 2,
   genre_other: 2,
   duration_minutes: 2,
-  trailer_url: 3,
 };

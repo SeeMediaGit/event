@@ -1,6 +1,7 @@
 "use client";
 
 import { getSupabaseBrowserClient } from "../supabase/client";
+import { compressPoster } from "./compressImage";
 
 // POSTERS ONLY. Mirrors see_media_admin/lib/bunnyUpload.ts: attach the Supabase
 // access token, post a multipart body to our own route, and let that route talk
@@ -17,7 +18,10 @@ import { getSupabaseBrowserClient } from "../supabase/client";
 
 export const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
-export const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+// What an entrant may CHOOSE. Anything above MAX_UPLOAD_BYTES is shrunk by
+// compressPoster() before it is sent; this ceiling only stops a file so large
+// that compressing it would lock the tab up for seconds first.
+export const MAX_IMAGE_SIZE = 25 * 1024 * 1024;
 
 export type UploadKind = "poster" | "horizontal_poster";
 
@@ -41,6 +45,9 @@ export function checkFile(file: File, _kind: UploadKind): string | null {
   if (file.size > MAX_IMAGE_SIZE) {
     return `Зураг ${formatBytes(MAX_IMAGE_SIZE)}-аас бага байх ёстой. Сонгосон файл: ${formatBytes(file.size)}.`;
   }
+  // Between MAX_UPLOAD_BYTES and MAX_IMAGE_SIZE nothing is refused here on
+  // purpose — compressPoster() shrinks those, and only gives up if it cannot.
+  
   return null;
 }
 
@@ -55,6 +62,13 @@ export async function uploadChallengeFile({
   kind: UploadKind;
   onProgress?: (percent: number) => void;
 }): Promise<UploadResult> {
+  // Shrink first. These bytes go through a Vercel function, which rejects a
+  // body over 4.5 MB before our route runs — the browser gets a bare 413 with
+  // no message of ours in it.
+  const prepared = await compressPoster(file);
+  if (!prepared.ok) return { ok: false, message: prepared.message };
+  file = prepared.file;
+
   const supabase = getSupabaseBrowserClient();
   const {
     data: { session },

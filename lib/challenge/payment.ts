@@ -22,6 +22,10 @@ export type PaymentInvoice = {
   qrText: string;
   qrImage: string;
   qPayShortUrl: string | null;
+  // Вэб дээр ЗУРАГДАХГҮЙ: банкны deeplink нь утасны хэрэгсэл, ширээний
+  // компьютер дээр огт нээгдэхгүй. Гар утсанд харин QR биш яг эдгээр л
+  // ажиллана (mobile/src/app/challenge/pay.tsx). Edge function хоёуланд нэг
+  // ижил хариу буцаадаг тул төрөлд нь үлдээв.
   urls: QPayBankUrl[];
   amount: number;
   applicationId: string;

@@ -4,8 +4,9 @@ import {
   getSupabaseServiceClient,
 } from "@/lib/supabase/server";
 
-// Step 2 of the film upload: ask Bunny whether the video has finished encoding
-// and write the answer to the row.
+// Step 2 of a video upload: ask Bunny whether the video has finished encoding
+// and write the answer to the row. Serves both the film and its trailer, told
+// apart by `kind` — same as film-ticket.
 //
 // The browser cannot be trusted to report this — it uploaded the bytes, but
 // "Bunny accepted them" and "Bunny produced a playable stream" are different
@@ -63,6 +64,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json().catch(() => null);
     const filmId = String(body?.filmId ?? "").trim();
+    const kind = body?.kind === "trailer" ? "trailer" : "film";
     if (!filmId) {
       return NextResponse.json({ error: "Кино тодорхойгүй байна." }, { status: 400 });
     }
@@ -71,7 +73,9 @@ export async function POST(request: NextRequest) {
 
     const { data: film, error: filmError } = await supabase
       .from("challenge_films")
-      .select("id, application_id, film_video_id, film_status")
+      .select(
+        "id, application_id, film_video_id, film_status, trailer_video_id, trailer_status",
+      )
       .eq("id", filmId)
       .maybeSingle();
 
@@ -93,21 +97,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Кино олдсонгүй." }, { status: 404 });
     }
 
-    if (!film.film_video_id) {
+    const videoId = kind === "trailer" ? film.trailer_video_id : film.film_video_id;
+    const currentStatus = kind === "trailer" ? film.trailer_status : film.film_status;
+
+    if (!videoId) {
       return NextResponse.json({ status: "pending" });
     }
 
     const res = await fetch(
-      `https://video.bunnycdn.com/library/${libraryId}/videos/${film.film_video_id}`,
+      `https://video.bunnycdn.com/library/${libraryId}/videos/${videoId}`,
       { headers: { AccessKey: apiKey }, cache: "no-store" },
     );
 
     if (!res.ok) {
       const details = await res.text().catch(() => "");
       console.error("Bunny Stream video fetch failed", { status: res.status, details });
-      // Not an error the entrant caused, and not a reason to mark the film
+      // Not an error the entrant caused, and not a reason to mark the video
       // failed — report the status we already have and let them retry.
-      return NextResponse.json({ status: film.film_status });
+      return NextResponse.json({ status: currentStatus });
     }
 
     const video = (await res.json()) as {
@@ -118,17 +125,24 @@ export async function POST(request: NextRequest) {
 
     const mapped = mapStatus(Number(video.status ?? 0));
 
-    if (mapped !== film.film_status) {
+    if (mapped !== currentStatus) {
+      // Stamp the arrival time when the stream first becomes playable — that is
+      // the moment the entry is genuinely in the organiser's hands.
+      const stampedAt = mapped === "ready" ? new Date().toISOString() : undefined;
+      const patch =
+        kind === "trailer"
+          ? {
+              trailer_status: mapped,
+              ...(stampedAt ? { trailer_uploaded_at: stampedAt } : {}),
+            }
+          : {
+              film_status: mapped,
+              ...(stampedAt ? { film_uploaded_at: stampedAt } : {}),
+            };
+
       const { error: updateError } = await supabase
         .from("challenge_films")
-        .update({
-          film_status: mapped,
-          // Stamp the arrival time when the stream first becomes playable —
-          // that is the moment the entry is genuinely in the organiser's hands.
-          ...(mapped === "ready"
-            ? { film_uploaded_at: new Date().toISOString() }
-            : {}),
-        })
+        .update(patch)
         .eq("id", film.id);
 
       if (updateError) {

@@ -204,7 +204,10 @@ export type ApplicationSummary = {
   registration_no: string | null;
   submitted_at: string | null;
   updated_at: string;
-  event: Pick<SeeEvent, "id" | "name" | "slug" | "poster_url" | "kind"> | null;
+  event: Pick<
+    SeeEvent,
+    "id" | "name" | "slug" | "image_urls" | "poster_url" | "cover_url" | "kind"
+  > | null;
 };
 
 // Two round trips rather than one PostgREST embed. The embed would work, but it
@@ -231,7 +234,7 @@ export async function fetchMyApplications(): Promise<ApplicationSummary[]> {
 
   const { data: events, error: eventsError } = await supabase
     .from("events")
-    .select("id, name, slug, poster_url, kind")
+    .select("id, name, slug, image_urls, poster_url, cover_url, kind")
     .in("id", rows.map((row) => row.event_id));
 
   if (eventsError) console.error("fetchMyApplications events error:", eventsError);

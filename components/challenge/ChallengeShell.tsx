@@ -120,9 +120,13 @@ export default function ChallengeShell({ slug }: { slug: string }) {
   }, [requested, lockedReason]);
 
   const goToStep = useCallback(
-    (n: number) => {
+    (n: number, extra?: Record<string, string>) => {
       const params = new URLSearchParams(searchParams.toString());
       params.set("step", String(n));
+      // `add=1` tells FilmsStep to create a draft and open its form on arrival,
+      // so "Эхний киногоо нэмэх" is one click rather than two.
+      params.delete("add");
+      for (const [k, v] of Object.entries(extra ?? {})) params.set(k, v);
       // replace, not push: the stepper is one screen with four faces, and
       // stacking every tab click in history would make Back mean "previous tab".
       router.replace(`?${params.toString()}`, { scroll: false });
@@ -160,8 +164,11 @@ export default function ChallengeShell({ slug }: { slug: string }) {
     }
     setApplication(result.application);
     setAppError(null);
-    if (statusRank(result.application?.status ?? null) >= 2) goToStep(4);
-  }, [eventId, goToStep]);
+    // Deliberately does NOT jump to step 4. Paying used to teleport the
+    // applicant straight into an empty films list, so they never saw the
+    // registration number they are told to keep. FeeStep now shows it and the
+    // move on is their own click.
+  }, [eventId]);
 
   // Submitting the application is what unlocks the fee step; move there rather
   // than leaving the applicant on a form that just turned read-only.
@@ -263,6 +270,8 @@ export default function ChallengeShell({ slug }: { slug: string }) {
                 event={load.event}
                 application={application}
                 onPaid={reloadApplication}
+                onAddFilm={() => goToStep(4, { add: "1" })}
+                onGoToFilms={() => goToStep(4)}
               />
             )}
             {step === 4 && (

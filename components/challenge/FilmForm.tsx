@@ -36,6 +36,7 @@ import {
   formatBytes,
   MAX_FILM_SIZE,
   uploadFilm,
+  type VideoKind,
 } from "@/lib/challenge/films/upload";
 import {
   ACCEPTED_IMAGE_TYPES,
@@ -385,20 +386,24 @@ export default function FilmForm({
         )}
       </Section>
 
-      <Section n={3} title="Трейлэр ба бүтээл">
-        <Field label="Трейлэр линк" htmlFor="trailer_url" error={errors.trailer_url}>
-          <TextInput
-            id="trailer_url"
-            inputMode="url"
-            value={form.trailer_url}
-            onChange={(v) => set("trailer_url", v)}
-            placeholder="https://…"
-            disabled={readOnly}
-            invalid={Boolean(errors.trailer_url)}
-          />
-        </Field>
+      <Section
+        n={3}
+        title="Бичлэг"
+        hint="Кино заавал. Трейлэр сонголтоор — оруулбал шүүгч эхлээд түүнийг үзнэ."
+      >
+        <VideoPicker
+          kind="film"
+          label="Киноны файл"
+          required
+          filmId={current.id}
+          film={current}
+          disabled={readOnly}
+          onUploaded={afterFilmUpload}
+        />
 
-        <FilmPicker
+        <VideoPicker
+          kind="trailer"
+          label="Трейлэр"
           filmId={current.id}
           film={current}
           disabled={readOnly}
@@ -540,12 +545,21 @@ function PosterPicker({
 // Film file
 // ---------------------------------------------------------------------------
 
-function FilmPicker({
+// One video slot. The film and the trailer differ only in which columns they
+// land in, so they share this component rather than diverging into two that
+// then drift.
+function VideoPicker({
+  kind,
+  label,
+  required,
   filmId,
   film,
   disabled,
   onUploaded,
 }: {
+  kind: VideoKind;
+  label: string;
+  required?: boolean;
   filmId: string;
   film: ChallengeFilm;
   disabled?: boolean;
@@ -557,28 +571,32 @@ function FilmPicker({
   const [encoding, setEncoding] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
 
+  const status = kind === "trailer" ? film.trailer_status : film.film_status;
+  const url = kind === "trailer" ? film.trailer_url : film.film_url;
+  const at = kind === "trailer" ? film.trailer_uploaded_at : film.film_uploaded_at;
+
   const busy = progress !== null || encoding;
-  const uploaded = film.film_status === "ready" && Boolean(film.film_url);
+  const uploaded = status === "ready" && Boolean(url);
 
   // Pick up an encode that finished while nobody was watching. The upload loop
   // below only polls for as long as the page stays open, so an entrant who
-  // uploads and immediately closes the tab would otherwise come back to a film
-  // stuck on "processing" forever — and be unable to submit it.
+  // uploads and immediately closes the tab would otherwise come back to a video
+  // stuck on "processing" forever — and be unable to submit.
   useEffect(() => {
-    if (film.film_status !== "processing") return;
+    if (status !== "processing") return;
     let mounted = true;
 
-    checkFilmStatus(filmId).then(({ status }) => {
-      if (mounted && status !== "processing") void onUploaded();
+    checkFilmStatus(filmId, kind).then((result) => {
+      if (mounted && result.status !== "processing") void onUploaded();
     });
 
     return () => {
       mounted = false;
     };
-    // Deliberately keyed on the film, not on onUploaded: re-running this on
+    // Deliberately keyed on the video, not on onUploaded: re-running this on
     // every parent render would poll Bunny on a loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filmId, film.film_status]);
+  }, [filmId, kind, status]);
 
   const pick = (selected: File | null) => {
     setFailed(null);
@@ -600,7 +618,7 @@ function FilmPicker({
     setFailed(null);
     setProgress(0);
 
-    const result = await uploadFilm({ file, filmId, onProgress: setProgress });
+    const result = await uploadFilm({ file, filmId, kind, onProgress: setProgress });
     setProgress(null);
 
     if (!result.ok) {
@@ -616,9 +634,9 @@ function FilmPicker({
     // when the entry is really in the organiser's hands.
     setEncoding(true);
     for (let attempt = 0; attempt < 60; attempt += 1) {
-      const { status } = await checkFilmStatus(filmId);
-      if (status === "ready") break;
-      if (status === "failed") {
+      const { status: fresh } = await checkFilmStatus(filmId, kind);
+      if (fresh === "ready") break;
+      if (fresh === "failed") {
         setEncoding(false);
         setFailed("Bunny бичлэгийг боловсруулж чадсангүй. Өөр файл оруулна уу.");
         await onUploaded();
@@ -633,24 +651,25 @@ function FilmPicker({
   return (
     <div>
       <p className="mb-1.5 block text-xs font-semibold text-white/70">
-        Киноны файл<span className="ml-1 text-brand">*</span>
+        {label}
+        {required && <span className="ml-1 text-brand">*</span>}
       </p>
 
       {uploaded && (
         <div className="mb-3 flex items-start gap-3 rounded-xl border border-brand/30 bg-brand/5 p-4">
           <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-brand" />
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-white">Бүтээл хүлээн авлаа.</p>
-            {film.film_uploaded_at && (
-              <p className="mt-1 text-[11px] text-muted">
-                {formatDateTime(film.film_uploaded_at)}
-              </p>
+            <p className="text-xs font-semibold text-white">
+              {kind === "trailer" ? "Трейлэр орлоо." : "Бүтээл хүлээн авлаа."}
+            </p>
+            {at && (
+              <p className="mt-1 text-[11px] text-muted">{formatDateTime(at)}</p>
             )}
           </div>
         </div>
       )}
 
-      {!uploaded && film.film_status === "processing" && !busy && (
+      {!uploaded && status === "processing" && !busy && (
         <div className="mb-3 flex items-start gap-3 rounded-xl border border-white/12 bg-white/[0.02] p-4">
           <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin text-white/40" />
           <p className="text-xs text-white/75">
@@ -688,7 +707,7 @@ function FilmPicker({
             ) : (
               <>
                 <span className="text-xs font-semibold text-white/80">
-                  {uploaded ? "Бүтээлээ солих" : "Файлаа сонгоно уу"}
+                  {uploaded ? "Солих" : "Файлаа сонгоно уу"}
                 </span>
                 <span className="mt-1 text-[11px] text-muted">
                   MP4, MOV, WebM, MKV. Дээд хэмжээ {formatBytes(MAX_FILM_SIZE)}.
@@ -745,12 +764,8 @@ function FilmPicker({
               ? "Байршуулж байна…"
               : encoding
                 ? "Боловсруулж байна…"
-                : "Бичлэг байршуулах"}
+                : "Байршуулах"}
           </button>
-
-          <p className="mt-2 text-[11px] text-muted">
-            Файл серверээр дамжихгүй, шууд Bunny руу очно. Тасарвал үргэлжилнэ.
-          </p>
         </>
       )}
     </div>
