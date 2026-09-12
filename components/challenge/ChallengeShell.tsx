@@ -106,18 +106,42 @@ export default function ChallengeShell({ slug }: { slug: string }) {
   // The step lives in the URL so a refresh, a back button or a shared link all
   // land in the same place. A step the applicant has not unlocked falls back to
   // the furthest one they have, rather than 404-ing or showing a locked screen.
+  // Where an arriving visitor lands when the URL names no step.
+  //
+  // It used to be step 1 for everyone, which meant someone who had already
+  // filled the form on the mobile app — and only owed the fee — was walked back
+  // through the introduction and then the form, as if none of it had happened.
+  // The furthest step their application has actually earned is the one they
+  // came for.
+  const landingStep = useMemo(() => {
+    if (!isSignedIn || !appLoaded) return FIRST_STEP;
+    switch (application?.status) {
+      case undefined:
+      case null:
+        return FIRST_STEP; // анкет огт үүсээгүй — танилцуулгаас
+      case "draft":
+        return 2; // эхэлсэн ч илгээгээгүй — маягтаа үргэлжлүүлнэ
+      case "submitted":
+        return 3; // илгээсэн, төлбөр дутуу — шууд төлбөр дээр
+      case "rejected":
+        return 2; // буцаасан — засах зүйл нь маягтад
+      default:
+        return 4; // paid болон түүнээс хойш — кинонууд
+    }
+  }, [isSignedIn, appLoaded, application?.status]);
+
   const requested = Number.parseInt(searchParams.get("step") ?? "", 10);
   const step = useMemo(() => {
     const wanted =
       Number.isFinite(requested) && requested >= FIRST_STEP && requested <= LAST_STEP
         ? requested
-        : FIRST_STEP;
+        : landingStep;
     if (!lockedReason(wanted)) return wanted;
     for (let n = wanted - 1; n >= FIRST_STEP; n -= 1) {
       if (!lockedReason(n)) return n;
     }
     return FIRST_STEP;
-  }, [requested, lockedReason]);
+  }, [requested, landingStep, lockedReason]);
 
   const goToStep = useCallback(
     (n: number, extra?: Record<string, string>) => {
