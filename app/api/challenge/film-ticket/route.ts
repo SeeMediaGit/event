@@ -55,7 +55,25 @@ function streamConfig() {
     .replace(/\/$/, "");
   // Optional: the "reel_challenge" collection inside the library. Without it
   // the video lands in the library root, mixed in with the catalogue.
-  const collectionId = process.env.BUNNY_STREAM_COLLECTION_ID?.trim() || null;
+  //
+  // Only a bare GUID is accepted. Copying the id out of the Bunny dashboard's
+  // URL drags a `?colid=…` query string along with it, and Bunny answers that
+  // with `Collection does not exist` — which reads like the collection was
+  // deleted rather than like a typo in an environment variable.
+  const rawCollection = process.env.BUNNY_STREAM_COLLECTION_ID?.trim() ?? "";
+  const collectionId = /^[0-9a-f-]{36}$/i.test(rawCollection)
+    ? rawCollection
+    : null;
+
+  if (rawCollection && !collectionId) {
+    // Loud, but NOT fatal. An entry landing in the library root is a tidiness
+    // problem for the organiser; refusing the upload would be a closed door for
+    // the entrant, possibly hours before a deadline.
+    console.error(
+      "BUNNY_STREAM_COLLECTION_ID is not a bare GUID, ignoring it:",
+      rawCollection,
+    );
+  }
 
   if (!libraryId || !apiKey || !cdnHostname) {
     return null;
@@ -194,7 +212,12 @@ export async function POST(request: NextRequest) {
         details,
       });
       return NextResponse.json(
-        { error: "Bunny дээр видео үүсгэж чадсангүй.", details },
+        {
+          error: details.includes("Collection does not exist")
+            ? "Bunny-гийн collection олдсонгүй. BUNNY_STREAM_COLLECTION_ID-г шалгана уу."
+            : "Bunny дээр видео үүсгэж чадсангүй.",
+          details,
+        },
         { status: 502 },
       );
     }
