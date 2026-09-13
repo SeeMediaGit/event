@@ -128,7 +128,7 @@ export async function POST(request: NextRequest) {
         hasCdn: Boolean(cdnBaseUrl),
       });
       return NextResponse.json(
-        { error: "Bunny CDN тохиргоо дутуу байна." },
+        { error: "Зураг байршуулах тохиргоо дутуу байна." },
         { status: 500 },
       );
     }
@@ -258,7 +258,7 @@ export async function POST(request: NextRequest) {
         storagePath,
       });
       return NextResponse.json(
-        { error: "Bunny руу байршуулж чадсангүй.", details },
+        { error: "Зургийг байршуулж чадсангүй.", details },
         { status: response.status },
       );
     }

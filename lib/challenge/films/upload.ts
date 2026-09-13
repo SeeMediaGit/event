@@ -133,6 +133,16 @@ export async function uploadFilm({
         filetype: file.type,
         title: file.name,
       },
+      // Scope the resume key to THIS video, not just to the file.
+      //
+      // tus-js-client remembers unfinished uploads by a fingerprint of the
+      // file, so picking the same film again resumed the PREVIOUS attempt's
+      // upload URL — which belongs to the previous ticket's video id. The bytes
+      // then landed in that older video while the row pointed at the new, empty
+      // one, and the screen waited forever for a stream that was being written
+      // somewhere else.
+      fingerprint: async (f) =>
+        ["bunny", ticket.videoId, f.name, f.size, f.lastModified].join("-"),
       onProgress: (uploaded, total) => {
         onProgress?.(Math.round((uploaded / total) * 100));
       },
@@ -147,8 +157,9 @@ export async function uploadFilm({
       },
     });
 
-    // Resume rather than restart when a previous attempt for this same file
-    // left a half-finished upload behind.
+    // Resume rather than restart when an attempt AGAINST THIS SAME VIDEO left
+    // a half-finished upload behind. A new ticket means a new video id, so it
+    // deliberately finds nothing and starts clean.
     upload.findPreviousUploads().then((previous) => {
       if (previous.length > 0) upload.resumeFromPreviousUpload(previous[0]);
       upload.start();

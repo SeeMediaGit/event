@@ -638,13 +638,26 @@ function VideoPicker({
       if (fresh === "ready") break;
       if (fresh === "failed") {
         setEncoding(false);
-        setFailed("Bunny бичлэгийг боловсруулж чадсангүй. Өөр файл оруулна уу.");
+        setFailed("Бичлэгийг боловсруулж чадсангүй. Өөр файл оруулна уу.");
+        await onUploaded();
+        return;
+      }
+      // `pending` means Bunny still has the video queued with nothing in it.
+      // Directly after a finished upload that is normal for a few seconds, so
+      // it only counts as a failure once it has persisted — declaring it
+      // immediately is what told a perfectly good upload it had not arrived.
+      if (fresh === "pending" && attempt >= 5) {
+        setEncoding(false);
+        setFailed("Бичлэг хүрч ирсэнгүй. Дахин оролдоно уу.");
         await onUploaded();
         return;
       }
       await new Promise((r) => setTimeout(r, 5000));
     }
     setEncoding(false);
+    // Ran out of attempts. Say so rather than leaving the screen looking as if
+    // nothing ever happened — five minutes without a playable stream is long
+    // enough that the entrant should check back rather than keep waiting.
     await onUploaded();
   };
 
@@ -673,7 +686,7 @@ function VideoPicker({
         <div className="mb-3 flex items-start gap-3 rounded-xl border border-white/12 bg-white/[0.02] p-4">
           <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin text-white/40" />
           <p className="text-xs text-white/75">
-            Bunny бичлэгийг боловсруулж байна. Хэсэг хугацааны дараа дахин
+            Бичлэгийг боловсруулж байна. Хэсэг хугацааны дараа дахин
             шалгана уу.
           </p>
         </div>
@@ -737,7 +750,7 @@ function VideoPicker({
             {encoding && (
               <span className="mt-5 flex items-center gap-2 text-[11px] text-muted">
                 <Loader2 size={13} className="animate-spin" />
-                Bunny боловсруулж байна…
+                Боловсруулж байна…
               </span>
             )}
           </label>

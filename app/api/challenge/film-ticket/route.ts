@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
         hasCdn: Boolean(process.env.BUNNY_STREAM_CDN_HOSTNAME),
       });
       return NextResponse.json(
-        { error: "Bunny Stream тохиргоо дутуу байна." },
+        { error: "Бичлэг байршуулах тохиргоо дутуу байна." },
         { status: 500 },
       );
     }
@@ -214,8 +214,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: details.includes("Collection does not exist")
-            ? "Bunny-гийн collection олдсонгүй. BUNNY_STREAM_COLLECTION_ID-г шалгана уу."
-            : "Bunny дээр видео үүсгэж чадсангүй.",
+            ? "Бичлэгийн сан олдсонгүй. Тохиргоог шалгана уу."
+            : "Бичлэг үүсгэж чадсангүй.",
           details,
         },
         { status: 502 },
@@ -226,7 +226,7 @@ export async function POST(request: NextRequest) {
     const videoId = created.guid;
     if (!videoId) {
       return NextResponse.json(
-        { error: "Bunny видеоны id буцаасангүй." },
+        { error: "Бичлэгийн дугаар үүссэнгүй." },
         { status: 502 },
       );
     }
@@ -242,21 +242,25 @@ export async function POST(request: NextRequest) {
     const playUrl = `https://${config.cdnHostname}/${videoId}/playlist.m3u8`;
 
     // Point the row at the new video straight away, under the service role —
-    // the client holds no grant on any of these columns. `processing` rather
-    // than `ready`: the bytes have not been sent yet, let alone encoded.
+    // the client holds no grant on any of these columns.
+    //
+    // `pending`, NOT `processing`: at this moment the video object exists and
+    // is empty. Claiming "processing" here made an upload that never started
+    // look identical to one that is transcoding, and the screen sat on
+    // "боловсруулж байна" forever with no way back.
     const patch =
       kind === "trailer"
         ? {
             trailer_video_id: videoId,
             trailer_url: playUrl,
-            trailer_status: "processing",
+            trailer_status: "pending",
             trailer_uploaded_at: null,
           }
         : {
             film_video_id: videoId,
             film_url: playUrl,
             film_path: `${config.libraryId}/${videoId}`,
-            film_status: "processing",
+            film_status: "pending",
             film_uploaded_at: null,
           };
 

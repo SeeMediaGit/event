@@ -24,9 +24,20 @@ export const dynamic = "force-dynamic";
 // Bunny Stream video.status
 //   0 Queued · 1 Processing · 2 Encoding · 3 Finished
 //   4 Resolution finished · 5 Failed
-function mapStatus(status: number): "processing" | "ready" | "failed" {
+//
+// 0 means "the object exists and is waiting" — which is also exactly what a
+// freshly created video looks like before a single byte has been sent, so it
+// maps to `pending` rather than `processing`. Anything past it has bytes.
+//
+// `storageSize` is NOT used to make this call. It reads 0 for the whole of an
+// upload and only fills in once Bunny starts encoding, so treating 0 as "never
+// arrived" declared a perfectly healthy upload dead mid-flight.
+type FileStatus = "pending" | "processing" | "ready" | "failed";
+
+function mapStatus(status: number): FileStatus {
   if (status === 3 || status === 4) return "ready";
   if (status === 5) return "failed";
+  if (status === 0) return "pending";
   return "processing";
 }
 
@@ -57,7 +68,7 @@ export async function POST(request: NextRequest) {
     const apiKey = process.env.BUNNY_STREAM_API_KEY?.trim();
     if (!libraryId || !apiKey) {
       return NextResponse.json(
-        { error: "Bunny Stream тохиргоо дутуу байна." },
+        { error: "Бичлэг байршуулах тохиргоо дутуу байна." },
         { status: 500 },
       );
     }
