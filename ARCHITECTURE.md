@@ -175,47 +175,111 @@ Client  → poster_url-даа маягтынхаа хамт хадгална (т
 хүний **хадгалагдсан** бүртгэл чимээгүй өөрчлөгдөх ёсгүй. Үнэ нь storage зон
 дотор хэн ч заагаагүй объект үлдэх — хямд тал нь.
 
-### 7.2 Кино — Bunny **Stream**, browser → Bunny шууд
+### 7.2 Кино — Supabase **Storage**, browser → Storage шууд
 
 ```
-1. Browser → POST /api/challenge/film-ticket    (жижигхэн JSON: { filmId })
+1. Browser → POST /api/challenge/film-ticket    (жижигхэн JSON: { filmId, kind, fileType })
 2. Server  → 7.1-ийн эзэмшигч / paid / хугацааны шалгалтыг ЯГ ИЖИЛ хийнэ
-           → Bunny: POST /library/{lib}/videos  (collectionId = reel_challenge)
-                    → videoId (guid)
-           → expire = now + 1 цаг
-             signature = sha256(libraryId + BUNNY_STREAM_API_KEY + expire + videoId)
-           → challenge_films-д film_video_id, film_url, film_status='processing'
-             бичнэ (service role — client эдгээрт grant-гүй)
-           → буцаана { libraryId, videoId, expire, signature }
-             ← API key өөрөө ХЭЗЭЭ Ч browser руу явахгүй
-3. Browser → tus-js-client → https://video.bunnycdn.com/tusupload
-             headers: AuthorizationSignature, AuthorizationExpire,
-                      VideoId, LibraryId
-             50MB chunk, тасарвал үргэлжилнэ, GB-ууд асуудалгүй
-4. Bunny   → transcode → HLS
-5. Browser → POST /api/challenge/film-status    (5 сек тутам)
-   Server  → Bunny-гээс видеоны status уншаад film_status-ыг
-             processing / ready / failed болгоно
+           → зам шийднэ:  <auth.uid()>/<film_id>/film-<ts>.<ext>
+           → хуучин файл байвал bucket-ээс устгана (service role)
+           → challenge_films-д film_path, film_url (public URL),
+             film_status='pending' бичнэ (service role — client grant-гүй)
+           → буцаана { bucket, objectName, url }
+3. Browser → tus-js-client → <SUPABASE_URL>/storage/v1/upload/resumable
+             headers: authorization: Bearer <өөрийн session JWT>, x-upsert
+             metadata: bucketName, objectName, contentType
+             6MB chunk (Supabase-ийн шаардлага), тасарвал үргэлжилнэ
+           ← storage.objects policy: эхний хавтас = auth.uid() бол зөвшөөрнө
+4. Browser → POST /api/challenge/film-status    (нэг удаа, хэрэгтэй бол 2 сек тутам)
+   Server  → storage.from('challenge-films').info(film_path)
+             байвал film_status='ready', film_uploaded_at=now()
 ```
 
-**Яагаад хоёр өөр зам вэ.** Bunny **Storage** нь зоны хэмжээний `AccessKey`
-header-ээр л танидаг — объект тус бүрийн гарын үсэг гэж **байхгүй**. Тэр key-тэй
-browser бүх зоныг устгаж чадна (тэр зон дотор платформын бүх кино, постер бий),
-тиймээс байт нь сервер дундуур явахаас өөр аргагүй. Bunny **Stream** харин
-видео тус бүрийн гарын үсэг өгдөг тул кино серверийг тойрч чадна.
+Bucket, policy: `see_media_admin/supabase/migrations/20260913000000_challenge_films_supabase_storage.sql`.
+Хадгалагдах зүйл: `film_path` = bucket доторх зам (file id-гийн үүрэг),
+`film_url` = тэр объектын public URL (татах / тоглуулах холбоос).
+`film_video_id` одоо NULL. Трейлэр ижил замаар `trailer-<ts>.<ext>` нэрээр орно;
+түүнд тусдаа path багана байхгүй тул `lib/challenge/films/storage.ts`
+URL-ээс нь буцааж уншина.
+
+**Яагаад Bunny Stream-ээс шилжсэн бэ (20260913).** Bunny Stream нь upload
+дууссаны дараа transcode хийдэг тул оролцогч «боловсруулж байна» гэж хэдэн
+минут хүлээж, ганц ч байт ирээгүй үед ч тэр мессежийг харж байсан. Storage-д
+сүүлийн chunk буусан мөчид файл бэлэн — нэг л алхам, нэг л төлөв (pending →
+ready). Мөн Bunny Stream-ийн 4 env, video объект үүсгэх, гарын үсэг зурах
+алхам бүгд хасагдсан; бүх зүйл нэг Supabase project дотор.
+
+**Яагаад ticket route хэвээр байгаа вэ.** Storage policy зөвхөн «эхний хавтас
+миний auth.uid() мөн үү» гэдгийг л мэднэ. Тэр film мөр минийх үү, төлбөр
+төлөгдсөн үү, хугацаа дууссан уу гэдгийг challenge_films /
+challenge_applications / events-ээс service role-оор шалгах газар нь энэ route.
+`film_*` баганыг ч client бичихгүй — route л бичнэ.
 
 Тэгэх ёстой ч байсан: Vercel-ийн serverless function-ий request body хязгаар
-**4.5 MB**. 20260910 хүртэл кино 7.1-ээр явж байсан бөгөөд production дээр
-оролцогч бүр 413 авах байсан (локал `next dev` дээр ийм хязгаар байхгүй тул
-deploy хийтэл мэдэгдэхгүй). Одоо байт Vercel-ийн дундуур огт өнгөрөхгүй.
+**4.5 MB**. Байт Vercel-ийн дундуур огт өнгөрөхгүй хэвээр.
+
+⚠️ **Хэмжээний хязгаар хоёр газар.** Bucket-ийн `file_size_limit` = 5 GB, мөн
+project-ийн Dashboard → Storage → Settings → **Global file size limit** мөн
+хүчинтэй (default 50 MB). Free plan дээр 50 MB-аас дээш боломжгүй; Pro дээр
+тохиргоог 5 GB болгоно (resumable upload-аар 50 GB хүртэл). Хязгаараас том
+файл 413-аар унана — UI «Файл storage-ийн зөвшөөрөгдсөн хэмжээнээс том» гэж
+хэлнэ.
 
 **`film_url` дангаараа «бичлэг орсон» гэсэн үг БИШ.** Түүнийг 2-р алхамд, ганц ч
 байт ирэхээс өмнө бичдэг. Бодит хариу нь `film_status = 'ready'` — UI болон
 илгээх шалгалт хоёулаа түүгээр шийднэ.
 
-Кино нь каталогийн кинотой **яг ижил хэлбэрийн URL** авна
-(`https://vz-….b-cdn.net/<guid>/playlist.m3u8`), тиймээс ялагчийг `movies` руу
-хөрвүүлэхэд тоглуулах зам аль хэдийн бэлэн.
+Bucket public тул admin панел, шүүгч `film_url`-ийг `<video>`-д шууд тавьж
+тоглуулна (mp4/webm — HLS биш). Хаалттай болгох бол `public = false` болгоод
+admin талд `createSignedUrl` ашиглана. 20260913-аас өмнөх мөрүүд Bunny-гийн
+`…/playlist.m3u8` URL-тэй хэвээр, тэдгээр Bunny дээр ажилласаар байна.
+
+### 7.3 Нийтлэх — Bunny, ГАРААР (20260921)
+
+Storage дахь файл бол **эх материал**. Хэрэглэгч түүнийг хэзээ ч харахгүй.
+
+```
+оролцогч → Supabase Storage        (7.2, эх материал)
+                 ↓  админ татаж үзнэ  (admin панел → «Татах холбоос»)
+                 ↓  Bunny дээр ГАРААР байршуулна  (Stream library эсвэл Storage zone)
+                 ↓  гарсан URL-ыг admin панелийн «Нийтлэх (Bunny)» талбарт буулгаад Хэрэглэх
+                 ↓  PATCH /api/admin/challenge/films/[id]  { action: 'set_bunny_url' }
+           challenge_films.bunny_url  ← service role
+                 ↓
+хэрэглэгч ← challenge_films_public view → мобайлын галерей
+```
+
+**Яагаад автоматжуулаагүй вэ.** Bunny руу програмаар байршуулах боломж
+одоогоор нээгдээгүй (2026-09-21). Тиймээс дамжуулах алхмыг хүн гүйцэтгэнэ —
+gating нь үүнээс хамаарахгүй, автоматжуулах боломж нээгдвэл зөвхөн энэ нэг
+алхам солигдоно (Bunny Stream-ийн `POST /library/{id}/videos/fetch` нь signed
+URL өгөхөд сервер талдаа өөрөө татдаг).
+
+**Нийтлэгдсэн эсэхийн ЦОРЫН ГАНЦ шалгуур нь `bunny_url`.** Тусдаа
+`is_published` туг зориуд байхгүй: тугийг query бүрт давтан шүүх ёстой болж,
+нэгийг нь мартахад гоожно (`mobile/src/lib/reels.ts`-ийн `withPreviewEpisode`
+нь `reel_videos.is_active`-ыг яг ингэж мартсан). Эх сурвалж байхгүй бол
+тоглуулах юм ч байхгүй.
+
+`challenge_films_public` view (20260921000000) — гарсан: `film_url`,
+`trailer_url` (Supabase дахь эх материал). Орсон: `bunny_url`,
+`bunny_trailer_url`. Шүүлтүүр: `status = 'approved' and bunny_url is not null`.
+
+**Гурван газар автоматаар цэвэрлэгдэнэ:**
+
+| Хэзээ | Юу болох | Хаана |
+|---|---|---|
+| Оролцогч файлаа дахин байршуулна | `bunny_url = null` → галерейгээс алга | [film-ticket route](app/api/challenge/film-ticket/route.ts) |
+| Админ бүтээлийг буцаана (`rejected`) | `bunny_url = null` | admin films route |
+| Админ «Нийтлэлтийг цуцлах» дарна | `bunny_url = null` | admin панел |
+
+Эхнийх нь хамгийн чухал: батлагдсаны дараа киногоо сольсон хүн Bunny дээрх
+ХУУЧИН хувилбараараа нийтлэгдсэн хэвээр үлдэх ёсгүй.
+
+URL-ыг route талд шалгана — хост нь `BUNNY_CDN_BASE_URL` /
+`BUNNY_STREAM_CDN_HOSTNAME` эсвэл `*.b-cdn.net` / `*.bunnycdn.com` байх ёстой.
+Гараар хуулахад нэг үсэг дутуу үлдэхэд хэрэглэгч хоосон player хардаг, харин
+админ мэдэхгүй — тиймээс хүлээж авахын өмнө шалгана.
 
 ## 8. Deploy
 
@@ -237,10 +301,9 @@ Env variables:
 | `BUNNY_STORAGE_ACCESS_KEY` | **server only** | browser руу гарвал бүх зон устгагдаж болно |
 | `BUNNY_CDN_BASE_URL` | **server only** | буцаах URL-ийн эх |
 | `BUNNY_STORAGE_ENDPOINT` | server only | заавал биш, REGION-ыг дарна |
-| `BUNNY_STREAM_LIBRARY_ID` | **server only** | Stream library-ийн дугаар, ж: 476065 |
-| `BUNNY_STREAM_API_KEY` | **server only** | Stream library-ийн API key. `BUNNY_STORAGE_ACCESS_KEY`-ЭЭС ӨӨР |
-| `BUNNY_STREAM_COLLECTION_ID` | server only | `reel_challenge` collection-ий guid. Байхгүй бол library-ийн үндэст орно |
-| `BUNNY_STREAM_CDN_HOSTNAME` | **server only** | ж: `vz-19386c30-38d.b-cdn.net` |
+
+`BUNNY_STREAM_*` хувьсагчид 20260913-аас хойш хэрэггүй (кино Supabase Storage-д
+орно, 7.2). Байвал гэм алга, уншихгүй.
 
 `NEXT_PUBLIC_` угтвар нь key-г автоматаар нийтэлдэггүй: Next нь **кодод
 бичигдсэн газарт нь** текстээр орлуулдаг тул зөвхөн server файлаас уншсан
@@ -262,8 +325,8 @@ key ч байхгүй.
   (20260907_challenge_applications.sql) + `/challenge/[slug]` 4 алхамт урсгал.
 - **Нэг хүн олон кино.** Хийгдсэн — `challenge_films`
   (20260910_challenge_films_and_payments.sql) + `FilmsStep` / `FilmForm`.
-- **Кино байршуулах.** Хийгдсэн — Bunny Stream + tus (7.2). Vercel-ийн 4.5 MB
-  хязгаар арилсан.
+- **Кино байршуулах.** Хийгдсэн — Supabase Storage + tus (7.2). Vercel-ийн
+  4.5 MB хязгаар арилсан; transcode алхам байхгүй.
 - **QPay.** Хийгдсэн — хоёр edge function
   (`supabase/functions/challenge-payment-{create,callback}`), тавих заавар
   [docs/QPAY_SETUP.md](docs/QPAY_SETUP.md). Web болон mobile ХОЁУЛАА яг тэр
@@ -285,5 +348,8 @@ key ч байхгүй.
   `mobile/src/lib/challenge.ts` дэх хуучин нэг-кино загварыг зориуд хэвээр
   үлдээв — тэр код зөвхөн анкет уншихад ажиллана.
 - **Санал хураалт.** `event_votes (event_id, entry_id, user_id)` + `unique(entry_id, user_id)` — нэг хүн нэг удаа.
+- **Уралдааны бүтээлийг нийтлэх.** Хийгдсэн — 7.3 (гараар Bunny). Дараагийн
+  алхам нь Bunny-гийн `videos/fetch` API-аар нэг товч болгох; өгөгдлийн загвар
+  (`bunny_url`) өөрчлөгдөхгүй.
 - **Видео тоглуулах.** Тоглуулах URL-ыг `events` дээр бүү тавь — **тусдаа `event_media` хүснэгтэд, policy огт үүсгэлгүй** байрлуул. Тэгвэл `select` бичихдээ алдсан ч гоожихгүй; `movies` дээр `hls_url` ижил мөрөн дээрээ байгаа болохоор `MOVIE_COLUMNS`-оос мартаж гаргавал шууд алдана. Дараа нь `/api/events/stream` нь `landing/app/api/watch/stream/route.ts`-ийг хуулж хийнэ.
 - **Slug URL.** `slug` багана бэлэн; `/events/[id]`-г `/events/[slug]` болгоход л хангалттай.

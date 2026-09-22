@@ -1,3 +1,10 @@
+> ⚠️ **20260913-аас хойш ХУУЧИРСАН.** Кино, трейлэр одоо Bunny Stream БИШ,
+> Supabase Storage-ийн `challenge-films` bucket-д орно (ARCHITECTURE.md 7.2).
+> Тавих зүйл нэг л SQL:
+> `see_media_admin/supabase/migrations/20260913000000_challenge_films_supabase_storage.sql`
+> + Dashboard → Storage → Settings → Global file size limit-ийг өсгөх.
+> `BUNNY_STREAM_*` env-үүд хэрэггүй. Энэ файл түүхийн лавлагаа болж үлдэнэ.
+
 # Bunny Stream — кино байршуулах: тавих заавар
 
 Код бүрэн бичигдсэн. Чамаас **дөрвөн утга** + Vercel дээр тавих ажил хэрэгтэй.

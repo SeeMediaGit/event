@@ -3,43 +3,27 @@ import {
   getSupabaseAnonClient,
   getSupabaseServiceClient,
 } from "@/lib/supabase/server";
+import { FILM_BUCKET, objectNameFromUrl } from "@/lib/challenge/films/storage";
 
-// Step 2 of a video upload: ask Bunny whether the video has finished encoding
-// and write the answer to the row. Serves both the film and its trailer, told
+// Step 2 of a video upload: confirm the object is really in the bucket and
+// write the answer to the row. Serves both the film and its trailer, told
 // apart by `kind` — same as film-ticket.
 //
 // The browser cannot be trusted to report this — it uploaded the bytes, but
-// "Bunny accepted them" and "Bunny produced a playable stream" are different
-// facts, and only Bunny knows the second one. So the client calls this and this
-// asks Bunny.
+// "the upload call returned" and "the object exists in storage" are different
+// facts, and only storage knows the second one. So the client calls this and
+// this asks storage under the service role, then flips film_status, which the
+// client holds no grant on.
 //
-// A webhook would also work and would save the polling, but it needs a public
-// endpoint registered in the Bunny dashboard and a shared secret to verify. One
-// route the entrant's own page can call is fewer moving parts for the same
-// outcome, and it also lets an organiser refresh a stuck row on demand.
+// Until 20260913 this asked Bunny Stream whether transcoding had finished.
+// Storage has no transcode step: the object either exists (ready) or it does
+// not (pending). `processing` is kept in the type for rows written before the
+// switch; nothing writes it any more.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Bunny Stream video.status
-//   0 Queued · 1 Processing · 2 Encoding · 3 Finished
-//   4 Resolution finished · 5 Failed
-//
-// 0 means "the object exists and is waiting" — which is also exactly what a
-// freshly created video looks like before a single byte has been sent, so it
-// maps to `pending` rather than `processing`. Anything past it has bytes.
-//
-// `storageSize` is NOT used to make this call. It reads 0 for the whole of an
-// upload and only fills in once Bunny starts encoding, so treating 0 as "never
-// arrived" declared a perfectly healthy upload dead mid-flight.
 type FileStatus = "pending" | "processing" | "ready" | "failed";
-
-function mapStatus(status: number): FileStatus {
-  if (status === 3 || status === 4) return "ready";
-  if (status === 5) return "failed";
-  if (status === 0) return "pending";
-  return "processing";
-}
 
 function getAccessToken(request: NextRequest): string | null {
   const header = request.headers.get("authorization");
@@ -64,15 +48,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const libraryId = process.env.BUNNY_STREAM_LIBRARY_ID?.trim();
-    const apiKey = process.env.BUNNY_STREAM_API_KEY?.trim();
-    if (!libraryId || !apiKey) {
-      return NextResponse.json(
-        { error: "Бичлэг байршуулах тохиргоо дутуу байна." },
-        { status: 500 },
-      );
-    }
-
     const body = await request.json().catch(() => null);
     const filmId = String(body?.filmId ?? "").trim();
     const kind = body?.kind === "trailer" ? "trailer" : "film";
@@ -85,7 +60,7 @@ export async function POST(request: NextRequest) {
     const { data: film, error: filmError } = await supabase
       .from("challenge_films")
       .select(
-        "id, application_id, film_video_id, film_status, trailer_video_id, trailer_status",
+        "id, application_id, film_path, film_status, trailer_url, trailer_status",
       )
       .eq("id", filmId)
       .maybeSingle();
@@ -108,65 +83,74 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Кино олдсонгүй." }, { status: 404 });
     }
 
-    const videoId = kind === "trailer" ? film.trailer_video_id : film.film_video_id;
-    const currentStatus = kind === "trailer" ? film.trailer_status : film.film_status;
+    const objectName =
+      kind === "trailer"
+        ? objectNameFromUrl(film.trailer_url)
+        : film.film_path;
+    const currentStatus: FileStatus =
+      kind === "trailer" ? film.trailer_status : film.film_status;
 
-    if (!videoId) {
-      return NextResponse.json({ status: "pending" });
+    // No storage path on the row: either no ticket was ever issued, or the row
+    // still points at a Bunny Stream video from before the switch. In the
+    // second case whatever status Bunny left behind stands — there is nothing
+    // in the bucket to check against and rewriting it would lose a good film.
+    if (!objectName || !objectName.includes("/")) {
+      return NextResponse.json({ status: currentStatus, encodeProgress: null });
     }
 
-    const res = await fetch(
-      `https://video.bunnycdn.com/library/${libraryId}/videos/${videoId}`,
-      { headers: { AccessKey: apiKey }, cache: "no-store" },
-    );
-
-    if (!res.ok) {
-      const details = await res.text().catch(() => "");
-      console.error("Bunny Stream video fetch failed", { status: res.status, details });
-      // Not an error the entrant caused, and not a reason to mark the video
-      // failed — report the status we already have and let them retry.
-      return NextResponse.json({ status: currentStatus });
+    // Already confirmed once. Storage objects do not un-exist on their own, so
+    // a second round-trip would only cost the entrant a wait.
+    if (currentStatus === "ready") {
+      return NextResponse.json({ status: "ready", encodeProgress: null });
     }
 
-    const video = (await res.json()) as {
-      status?: number;
-      length?: number;
-      encodeProgress?: number;
-    };
+    const { data: info, error: infoError } = await supabase.storage
+      .from(FILM_BUCKET)
+      .info(objectName);
 
-    const mapped = mapStatus(Number(video.status ?? 0));
-
-    if (mapped !== currentStatus) {
-      // Stamp the arrival time when the stream first becomes playable — that is
-      // the moment the entry is genuinely in the organiser's hands.
-      const stampedAt = mapped === "ready" ? new Date().toISOString() : undefined;
-      const patch =
-        kind === "trailer"
-          ? {
-              trailer_status: mapped,
-              ...(stampedAt ? { trailer_uploaded_at: stampedAt } : {}),
-            }
-          : {
-              film_status: mapped,
-              ...(stampedAt ? { film_uploaded_at: stampedAt } : {}),
-            };
-
-      const { error: updateError } = await supabase
-        .from("challenge_films")
-        .update(patch)
-        .eq("id", film.id);
-
-      if (updateError) {
-        console.error("film-status: row update failed", updateError);
-        return NextResponse.json({ error: updateError.message }, { status: 500 });
+    // A missing object is the normal answer while the upload is still in
+    // flight (or was abandoned), so it is `pending` — not an error, and not
+    // `failed`. Anything other than "not found" is a storage problem that is
+    // not the entrant's fault: report what we already have and let them retry.
+    if (infoError) {
+      const code = String(
+        (infoError as { statusCode?: string | number }).statusCode ?? "",
+      );
+      const notFound =
+        code === "404" || /not found|does not exist/i.test(infoError.message);
+      if (!notFound) {
+        console.error("film-status: storage info failed", infoError);
+        return NextResponse.json({ status: currentStatus, encodeProgress: null });
       }
+      return NextResponse.json({ status: "pending", encodeProgress: null });
+    }
+    if (!info) {
+      return NextResponse.json({ status: "pending", encodeProgress: null });
     }
 
-    return NextResponse.json({
-      status: mapped,
-      encodeProgress: video.encodeProgress ?? null,
-      durationSeconds: video.length ?? null,
-    });
+    // Storage accepts the object as soon as the last tus chunk lands, but a
+    // zero-byte object is not a film — treat it like nothing arrived.
+    if (info.size !== undefined && info.size !== null && info.size <= 0) {
+      return NextResponse.json({ status: "pending", encodeProgress: null });
+    }
+
+    const now = new Date().toISOString();
+    const patch =
+      kind === "trailer"
+        ? { trailer_status: "ready", trailer_uploaded_at: now }
+        : { film_status: "ready", film_uploaded_at: now };
+
+    const { error: updateError } = await supabase
+      .from("challenge_films")
+      .update(patch)
+      .eq("id", film.id);
+
+    if (updateError) {
+      console.error("film-status: row update failed", updateError);
+      return NextResponse.json({ error: "Төлөв хадгалж чадсангүй." }, { status: 500 });
+    }
+
+    return NextResponse.json({ status: "ready", encodeProgress: null });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error("film-status route error", error);

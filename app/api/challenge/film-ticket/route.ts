@@ -1,38 +1,43 @@
-import { createHash } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import {
   getSupabaseAnonClient,
   getSupabaseServiceClient,
 } from "@/lib/supabase/server";
+import {
+  FILM_BUCKET,
+  objectNameFromUrl,
+  publicUrl,
+} from "@/lib/challenge/films/storage";
 
-// Step 1 of a video upload: create an empty video object in the Bunny Stream
-// library and hand the browser a short-lived signature for it.
+// Step 1 of a video upload: decide WHERE in Supabase Storage the file goes,
+// point the row at it, and hand the browser that path.
 //
 // Serves BOTH videos an entry carries — the film and its trailer — told apart by
-// `kind`. They differ only in which three columns the answer is written to; the
-// ownership checks, the signature and the tus flow are identical, so splitting
-// this into two routes would be two copies of the same rules drifting apart.
+// `kind`. They differ only in which columns the answer is written to; the
+// ownership checks and the upload flow are identical, so splitting this into
+// two routes would be two copies of the same rules drifting apart.
 //
 // WHY NOT THROUGH THIS SERVER: the bytes of a film do not fit through a Vercel
-// function — the platform caps a request body at 4.5 MB, so the old
-// /api/challenge/upload path died on the first megabyte of any real entry. Here
-// only a small JSON travels through Vercel; the file itself goes browser →
-// Bunny directly over tus (resumable, chunked, gigabytes are fine).
+// function — the platform caps a request body at 4.5 MB. Here only a small JSON
+// travels through Vercel; the file itself goes browser → Supabase Storage
+// directly over tus (resumable, chunked, gigabytes are fine).
 //
-// WHY A SIGNATURE AND NOT THE KEY: Bunny Stream accepts a per-video signature
-// — sha256(libraryId + apiKey + expire + videoId) — that authorises uploading
-// to THAT ONE video until it expires. The library's API key stays on the
-// server. This is exactly what Bunny Storage lacks (AccessKey-only, no
-// per-object signing), which is why posters still go through the server route
-// and films no longer do.
+// WHY THIS ROUTE STILL EXISTS when the browser could write to storage on its
+// own: the storage policy only knows "is the first folder my own user id". It
+// cannot tell whether the film row belongs to this user, whether the fee is
+// paid, or whether the submission window is still open — those live in
+// challenge_films / challenge_applications / events, and this route is where
+// they are checked under the service role before a path is handed out. The
+// film_* columns are also written here: the client holds no grant on them.
+//
+// Until 20260913 this created a Bunny Stream video and signed a per-video
+// ticket. Storage needs no ticket — the browser's own session JWT plus the
+// bucket policy in 20260913000000_challenge_films_supabase_storage.sql is
+// the authorisation — and there is no transcode step afterwards, so a file is
+// playable the moment it lands.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-// One hour. Long enough for a slow phone on a bad connection to finish a
-// gigabyte, short enough that a leaked ticket is worthless by the time anyone
-// finds it. It authorises writing one video that we just created, nothing else.
-const TICKET_TTL_SECONDS = 60 * 60;
 
 const UPLOADABLE_APPLICATION_STATUSES = new Set([
   "paid",
@@ -41,44 +46,21 @@ const UPLOADABLE_APPLICATION_STATUSES = new Set([
   "approved",
 ]);
 
+// Same list as ACCEPTED_FILM_TYPES in lib/challenge/films/upload.ts, and as
+// the bucket's allowed_mime_types. The extension is derived from the MIME type
+// rather than taken from the file name so that a name like "кино.MOV" or
+// "film" (no extension) still yields a sensible object key.
+const EXTENSION_BY_TYPE: Record<string, string> = {
+  "video/mp4": "mp4",
+  "video/quicktime": "mov",
+  "video/webm": "webm",
+  "video/x-matroska": "mkv",
+};
+
 function getAccessToken(request: NextRequest): string | null {
   const header = request.headers.get("authorization");
   if (!header?.toLowerCase().startsWith("bearer ")) return null;
   return header.slice(7).trim() || null;
-}
-
-function streamConfig() {
-  const libraryId = process.env.BUNNY_STREAM_LIBRARY_ID?.trim();
-  const apiKey = process.env.BUNNY_STREAM_API_KEY?.trim();
-  const cdnHostname = process.env.BUNNY_STREAM_CDN_HOSTNAME?.trim()
-    .replace(/^https?:\/\//, "")
-    .replace(/\/$/, "");
-  // Optional: the "reel_challenge" collection inside the library. Without it
-  // the video lands in the library root, mixed in with the catalogue.
-  //
-  // Only a bare GUID is accepted. Copying the id out of the Bunny dashboard's
-  // URL drags a `?colid=…` query string along with it, and Bunny answers that
-  // with `Collection does not exist` — which reads like the collection was
-  // deleted rather than like a typo in an environment variable.
-  const rawCollection = process.env.BUNNY_STREAM_COLLECTION_ID?.trim() ?? "";
-  const collectionId = /^[0-9a-f-]{36}$/i.test(rawCollection)
-    ? rawCollection
-    : null;
-
-  if (rawCollection && !collectionId) {
-    // Loud, but NOT fatal. An entry landing in the library root is a tidiness
-    // problem for the organiser; refusing the upload would be a closed door for
-    // the entrant, possibly hours before a deadline.
-    console.error(
-      "BUNNY_STREAM_COLLECTION_ID is not a bare GUID, ignoring it:",
-      rawCollection,
-    );
-  }
-
-  if (!libraryId || !apiKey || !cdnHostname) {
-    return null;
-  }
-  return { libraryId, apiKey, cdnHostname, collectionId };
 }
 
 export async function POST(request: NextRequest) {
@@ -98,26 +80,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const config = streamConfig();
-    if (!config) {
-      console.error("Bunny Stream env missing", {
-        hasLibrary: Boolean(process.env.BUNNY_STREAM_LIBRARY_ID),
-        hasKey: Boolean(process.env.BUNNY_STREAM_API_KEY),
-        hasCdn: Boolean(process.env.BUNNY_STREAM_CDN_HOSTNAME),
-      });
-      return NextResponse.json(
-        { error: "Бичлэг байршуулах тохиргоо дутуу байна." },
-        { status: 500 },
-      );
-    }
-
     const body = await request.json().catch(() => null);
     const filmId = String(body?.filmId ?? "").trim();
-    const fileName = String(body?.fileName ?? "").trim();
+    const fileType = String(body?.fileType ?? "").trim();
     const kind = body?.kind === "trailer" ? "trailer" : "film";
 
     if (!filmId) {
       return NextResponse.json({ error: "Кино тодорхойгүй байна." }, { status: 400 });
+    }
+    const extension = EXTENSION_BY_TYPE[fileType];
+    if (!extension) {
+      return NextResponse.json(
+        { error: "Зөвхөн MP4, MOV, WebM, MKV бичлэг оруулах боломжтой." },
+        { status: 400 },
+      );
     }
 
     const supabase = getSupabaseServiceClient();
@@ -126,7 +102,7 @@ export async function POST(request: NextRequest) {
     // user_id against the verified caller, never from the request body.
     const { data: film, error: filmError } = await supabase
       .from("challenge_films")
-      .select("id, application_id, event_id, status, title")
+      .select("id, application_id, event_id, status, film_path, trailer_url")
       .eq("id", filmId)
       .maybeSingle();
 
@@ -184,84 +160,65 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create the video object. Bunny needs it to exist before anything can be
-    // uploaded into it — the tus upload targets this guid.
-    const createRes = await fetch(
-      `https://video.bunnycdn.com/library/${config.libraryId}/videos`,
-      {
-        method: "POST",
-        headers: {
-          AccessKey: config.apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          // The title is what an organiser sees in the Bunny dashboard, so it
-          // has to say which of the two videos this is.
-          title: `${kind === "trailer" ? "[Трейлэр] " : ""}${
-            film.title?.trim() || fileName || film.id
-          }`,
-          ...(config.collectionId ? { collectionId: config.collectionId } : {}),
-        }),
-      },
-    );
+    // <user_id>/<film_id>/<kind>-<ts>.<ext>
+    //
+    // The user id comes FIRST because that is the one thing the storage policy
+    // can check: `(storage.foldername(name))[1] = auth.uid()`. A timestamp
+    // rather than a fixed name so that replacing a film never collides with a
+    // half-finished upload of the previous one, and so a CDN never serves a
+    // stale cached copy under the same key.
+    const objectName = `${userData.user.id}/${film.id}/${kind}-${Date.now()}.${extension}`;
+    const url = publicUrl(objectName);
 
-    if (!createRes.ok) {
-      const details = await createRes.text().catch(() => "");
-      console.error("Bunny Stream create video failed", {
-        status: createRes.status,
-        details,
-      });
-      return NextResponse.json(
-        {
-          error: details.includes("Collection does not exist")
-            ? "Бичлэгийн сан олдсонгүй. Тохиргоог шалгана уу."
-            : "Бичлэг үүсгэж чадсангүй.",
-          details,
-        },
-        { status: 502 },
-      );
+    // Drop the previous file for this slot, if it was one of ours. Best effort:
+    // an orphaned object is a storage-cost problem, not a reason to refuse the
+    // entrant a new upload. Bunny-era rows carry a `<libraryId>/<guid>` path
+    // that never existed in the bucket, so removing it is a harmless no-op.
+    const previous =
+      kind === "trailer"
+        ? objectNameFromUrl(film.trailer_url)
+        : film.film_path;
+    if (previous) {
+      const { error: removeError } = await supabase.storage
+        .from(FILM_BUCKET)
+        .remove([previous]);
+      if (removeError) {
+        console.warn("film-ticket: previous object not removed", {
+          previous,
+          removeError,
+        });
+      }
     }
 
-    const created = (await createRes.json()) as { guid?: string };
-    const videoId = created.guid;
-    if (!videoId) {
-      return NextResponse.json(
-        { error: "Бичлэгийн дугаар үүссэнгүй." },
-        { status: 502 },
-      );
-    }
-
-    const expire = Math.floor(Date.now() / 1000) + TICKET_TTL_SECONDS;
-    const signature = createHash("sha256")
-      .update(`${config.libraryId}${config.apiKey}${expire}${videoId}`)
-      .digest("hex");
-
-    // HLS rather than play_1080p.mp4: the playlist exists for every encoded
-    // video, while a given mp4 rendition only exists if that resolution was
-    // enabled and finished. The catalogue's own hls_url is the same shape.
-    const playUrl = `https://${config.cdnHostname}/${videoId}/playlist.m3u8`;
-
-    // Point the row at the new video straight away, under the service role —
+    // Point the row at the new object straight away, under the service role —
     // the client holds no grant on any of these columns.
     //
-    // `pending`, NOT `processing`: at this moment the video object exists and
-    // is empty. Claiming "processing" here made an upload that never started
-    // look identical to one that is transcoding, and the screen sat on
-    // "боловсруулж байна" forever with no way back.
+    // `pending`, NOT `ready`: at this moment the path is decided and nothing
+    // is in it. film-status flips it to `ready` once the object is actually
+    // there, so a closed tab mid-upload never leaves a row claiming a film
+    // that does not exist.
+    // `bunny_*` нь мөн цэвэрлэгдэнэ (20260921000000). Нийтэд харагдаж байгаа
+    // зүйл бол админы Bunny дээр тавьсан хуулбар, энэ файл биш — тэр хуулбар
+    // одооноос хуучирлаа. Цэвэрлэхгүй бол батлагдсаны дараа киногоо сольсон
+    // хүн Bunny дээрх ӨМНӨХ хувилбараараа нийтлэгдсэн хэвээр үлдэнэ.
     const patch =
       kind === "trailer"
         ? {
-            trailer_video_id: videoId,
-            trailer_url: playUrl,
+            trailer_video_id: null,
+            trailer_url: url,
             trailer_status: "pending",
             trailer_uploaded_at: null,
+            bunny_trailer_url: null,
           }
         : {
-            film_video_id: videoId,
-            film_url: playUrl,
-            film_path: `${config.libraryId}/${videoId}`,
+            film_video_id: null,
+            film_url: url,
+            film_path: objectName,
             film_status: "pending",
             film_uploaded_at: null,
+            bunny_url: null,
+            published_at: null,
+            published_by: null,
           };
 
     const { error: updateError } = await supabase
@@ -278,10 +235,9 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({
-      libraryId: config.libraryId,
-      videoId,
-      expire,
-      signature,
+      bucket: FILM_BUCKET,
+      objectName,
+      url,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

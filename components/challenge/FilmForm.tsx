@@ -578,10 +578,10 @@ function VideoPicker({
   const busy = progress !== null || encoding;
   const uploaded = status === "ready" && Boolean(url);
 
-  // Pick up an encode that finished while nobody was watching. The upload loop
-  // below only polls for as long as the page stays open, so an entrant who
-  // uploads and immediately closes the tab would otherwise come back to a video
-  // stuck on "processing" forever — and be unable to submit.
+  // Pick up a row left on "processing" by the Bunny-era flow (before
+  // 20260913 the server wrote that while transcoding ran). Nothing writes it
+  // any more, but a row that still carries it would otherwise sit there
+  // forever — and the entrant would be unable to submit.
   useEffect(() => {
     if (status !== "processing") return;
     let mounted = true;
@@ -594,7 +594,7 @@ function VideoPicker({
       mounted = false;
     };
     // Deliberately keyed on the video, not on onUploaded: re-running this on
-    // every parent render would poll Bunny on a loop.
+    // every parent render would poll storage on a loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filmId, kind, status]);
 
@@ -629,35 +629,31 @@ function VideoPicker({
     setFile(null);
     if (inputRef.current) inputRef.current.value = "";
 
-    // Bunny took the bytes; it has not finished encoding them. Poll until the
-    // stream is actually playable, because that — not the upload finishing — is
-    // when the entry is really in the organiser's hands.
+    // Storage took the bytes. Ask the server to confirm the object is really
+    // there and flip film_status to ready — that, not the upload finishing, is
+    // when the entry is in the organiser's hands. There is no transcode step
+    // any more, so this normally answers on the first try; the retries cover
+    // the second or two storage can take to make a just-finished object
+    // visible to a fresh request.
     setEncoding(true);
-    for (let attempt = 0; attempt < 60; attempt += 1) {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
       const { status: fresh } = await checkFilmStatus(filmId, kind);
       if (fresh === "ready") break;
       if (fresh === "failed") {
         setEncoding(false);
-        setFailed("Бичлэгийг боловсруулж чадсангүй. Өөр файл оруулна уу.");
+        setFailed("Бичлэгийг хадгалж чадсангүй. Өөр файл оруулна уу.");
         await onUploaded();
         return;
       }
-      // `pending` means Bunny still has the video queued with nothing in it.
-      // Directly after a finished upload that is normal for a few seconds, so
-      // it only counts as a failure once it has persisted — declaring it
-      // immediately is what told a perfectly good upload it had not arrived.
-      if (fresh === "pending" && attempt >= 5) {
+      if (attempt === 5) {
         setEncoding(false);
         setFailed("Бичлэг хүрч ирсэнгүй. Дахин оролдоно уу.");
         await onUploaded();
         return;
       }
-      await new Promise((r) => setTimeout(r, 5000));
+      await new Promise((r) => setTimeout(r, 2000));
     }
     setEncoding(false);
-    // Ran out of attempts. Say so rather than leaving the screen looking as if
-    // nothing ever happened — five minutes without a playable stream is long
-    // enough that the entrant should check back rather than keep waiting.
     await onUploaded();
   };
 
@@ -686,8 +682,7 @@ function VideoPicker({
         <div className="mb-3 flex items-start gap-3 rounded-xl border border-white/12 bg-white/[0.02] p-4">
           <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin text-white/40" />
           <p className="text-xs text-white/75">
-            Бичлэгийг боловсруулж байна. Хэсэг хугацааны дараа дахин
-            шалгана уу.
+            Бичлэгийг шалгаж байна. Хэсэг хугацааны дараа дахин шалгана уу.
           </p>
         </div>
       )}
@@ -750,7 +745,7 @@ function VideoPicker({
             {encoding && (
               <span className="mt-5 flex items-center gap-2 text-[11px] text-muted">
                 <Loader2 size={13} className="animate-spin" />
-                Боловсруулж байна…
+                Шалгаж байна…
               </span>
             )}
           </label>
@@ -776,7 +771,7 @@ function VideoPicker({
             {progress !== null
               ? "Байршуулж байна…"
               : encoding
-                ? "Боловсруулж байна…"
+                ? "Шалгаж байна…"
                 : "Байршуулах"}
           </button>
         </>

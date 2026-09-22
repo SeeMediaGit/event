@@ -26,9 +26,14 @@ export type ClientWritableFilmStatus = Extract<
 >;
 
 // Where the video file itself is. Separate from `status` on purpose: a film can
-// be fully described and submitted while its upload is still transcoding, and
+// be fully described and submitted while its upload is still in flight, and
 // an organiser reviewing entries needs to tell "no film yet" from "film sent,
 // not reviewed yet".
+//
+// `processing` is a leftover from the Bunny Stream era (before 20260913, when
+// the server wrote it while Bunny transcoded). Storage has no such step, so
+// nothing writes it any more; it stays in the union for rows that still carry
+// it and for the CHECK constraint, which was not touched.
 export type FilmFileStatus = "pending" | "processing" | "ready" | "failed";
 
 export type ChallengeFilm = {
@@ -55,16 +60,25 @@ export type ChallengeFilm = {
   genre_other: string | null;
   duration_minutes: number | null;
 
-  // 20260912_challenge_trailer_upload.sql. The trailer is a Bunny Stream video
+  // 20260912_challenge_trailer_upload.sql. The trailer is an uploaded video
   // too, not a link the entrant pastes: a pasted link can be taken down or made
-  // private after judging starts. Written by the upload route, like the film.
+  // private after judging starts. Written by the ticket route, like the film.
+  //
+  // Since 20260913 the file lives in the Supabase Storage bucket
+  // `challenge-films`: trailer_url is its public URL, trailer_video_id is null
+  // (it was the Bunny Stream guid). The object path is not stored separately —
+  // lib/challenge/films/storage.ts reads it back out of the URL.
   trailer_url: string | null;
   trailer_video_id: string | null;
   trailer_status: FilmFileStatus;
   trailer_uploaded_at: string | null;
 
-  // Written by the upload route under the service role — the client holds no
-  // grant on any of these four.
+  // Written by the ticket / status routes under the service role — the client
+  // holds no grant on any of these five.
+  //
+  //   film_path      <user_id>/<film_id>/film-<ts>.<ext> inside the bucket
+  //   film_url       the public URL of that object
+  //   film_video_id  null since 20260913 (was the Bunny Stream guid)
   film_url: string | null;
   film_path: string | null;
   film_video_id: string | null;
@@ -86,7 +100,7 @@ export const FILM_STATUS_LABEL: Record<FilmStatus, string> = {
 
 export const FILM_FILE_STATUS_LABEL: Record<FilmFileStatus, string> = {
   pending: "Бичлэг ороогүй",
-  processing: "Боловсруулж байна",
+  processing: "Шалгаж байна",
   ready: "Бэлэн",
   failed: "Амжилтгүй",
 };
